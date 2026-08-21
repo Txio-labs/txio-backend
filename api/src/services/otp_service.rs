@@ -38,7 +38,9 @@ impl OTPService {
 
         let code = generate_otp(OTP_LENGTH);
         let otp = OTP::new(email.to_string(), code.clone());
-        self.repository.save(&otp).await?;
+        self.repository
+            .upsert_otp(&otp, OTP_SEND_COOLDOWN_SECONDS)
+            .await?;
 
         Ok(code)
     }
@@ -98,4 +100,20 @@ pub(crate) fn constant_time_eq(a: &str, b: &str) -> bool {
     }
 
     diff == 0
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_constant_time_eq_matching() {
+        assert!(constant_time_eq("123456", "123456"));
+    }
+
+    #[test]
+    fn test_constant_time_eq_mismatch() {
+        assert!(!constant_time_eq("123456", "654321"));
+        assert!(!constant_time_eq("123456", "12345"));
+    }
 }
