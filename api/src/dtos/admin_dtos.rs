@@ -1,5 +1,4 @@
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 use validator::Validate;
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -24,14 +23,4 @@ pub struct AdminLogEntry {
     pub method: String,
     pub success: bool,
     pub error: Option<String>,
-    pub timestamp: String,
-}
-
-#[derive(Debug, Serialize, Deserialize, Validate)]
-pub struct RpcLogRequest {
-    #[validate(length(min = 1))]
-    pub method: String,
-    pub params: Value,
-    pub success: bool,
-    pub error: Option<String>,
-}
+    pub timestamp: String,}

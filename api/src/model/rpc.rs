@@ -20,9 +20,12 @@ impl RpcLog {
         user_id: ObjectId,
         method: String,
         params: Value,
-        success: bool,
-        error: Option<String>,
+        rpc_result: Result<Value, String>,
     ) -> Self {
+        let (success, error) = match rpc_result {
+            Ok(_) => (true, None),
+            Err(e) => (false, Some(e)),
+        };
         Self {
             id: None,
             user_id,
@@ -125,8 +128,7 @@ mod tests {
             ObjectId::new(),
             "eth_sendRawTransaction".to_string(),
             params,
-            true,
-            None,
+            Ok(Value::Null),
         );
         let params = log.params;
 
@@ -152,8 +154,7 @@ mod tests {
             ObjectId::new(),
             "eth_blockNumber".to_string(),
             params,
-            true,
-            None,
+            Ok(Value::Null),
         );
         assert_eq!(
             log.params,
@@ -173,8 +174,7 @@ mod tests {
             ObjectId::new(),
             "sui_executeTransactionBlock".to_string(),
             params,
-            true,
-            None,
+            Ok(Value::Null),
         );
 
         assert_eq!(log.params[0], Value::String("[REDACTED]".to_string()));
