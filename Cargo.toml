@@ -29,7 +29,7 @@ uuid = { version = "1", features = ["v4", "serde"] }
 dotenvy = "0.15"
 validator = { version = "0.16", features = ["derive"] }
 bcrypt = "0.15"
-tower-http = { version = "0.5", features = ["cors", "limit"] }
+tower-http = { version = "0.5", features = ["cors", "limit", "trace"] }
 tower = { version = "0.5", features = ["full"] }
 tower_governor = "0.5.0"
 brevo = "1.0"

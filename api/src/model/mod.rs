@@ -1,4 +1,5 @@
 pub mod collection;
+pub mod history;
 pub mod network;
 pub mod otp;
 pub mod recipe_template;

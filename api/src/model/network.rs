@@ -63,10 +63,18 @@ impl Network {
     /// The backend is a Sui-focused RPC gateway, so this is its canonical
     /// per-network URL. The CLI is multi-chain and resolves URLs per chain in
     /// its own adapters.
+    ///
+    /// Mainnet/testnet point at PublicNode's Sui JSON-RPC mirror rather than
+    /// the official `fullnode.*.sui.io` hosts: Sui deprecated JSON-RPC on its
+    /// own public fullnodes (they now return "Method not found. JSON-RPC on
+    /// public fullnodes has been deprecated" for every method — verified
+    /// live). Devnet has no known public JSON-RPC mirror, so it's left
+    /// pointing at the official, now-broken URL so failures there are
+    /// obvious rather than silently routed to the wrong network.
     pub const fn sui_url(&self) -> &'static str {
         match self {
-            Network::Mainnet => "https://fullnode.mainnet.sui.io:443",
-            Network::Testnet => "https://fullnode.testnet.sui.io:443",
+            Network::Mainnet => "https://sui-rpc.publicnode.com",
+            Network::Testnet => "https://sui-testnet-rpc.publicnode.com",
             Network::Devnet => "https://fullnode.devnet.sui.io:443",
             Network::Localnet => "http://127.0.0.1:9000",
         }
@@ -216,10 +224,7 @@ mod tests {
 
     #[test]
     fn sui_url_covers_every_network_including_localnet() {
-        assert_eq!(
-            Network::Mainnet.sui_url(),
-            "https://fullnode.mainnet.sui.io:443"
-        );
+        assert_eq!(Network::Mainnet.sui_url(), "https://sui-rpc.publicnode.com");
         assert_eq!(Network::Localnet.sui_url(), "http://127.0.0.1:9000");
     }
 }

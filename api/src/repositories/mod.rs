@@ -1,4 +1,5 @@
 pub mod collection_repository;
+pub mod history_repository;
 pub mod otp_repository;
 pub mod recipe_template_repository;
 pub mod request_repository;
