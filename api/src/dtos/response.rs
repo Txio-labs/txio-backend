@@ -9,6 +9,7 @@ pub struct UserResponse {
     pub created_at: String,
     pub notification_preferences: NotificationPreferences,
     pub github_account: Option<GitHubAccount>,
+    pub google_linked: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

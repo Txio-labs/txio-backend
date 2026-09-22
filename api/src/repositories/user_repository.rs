@@ -77,6 +77,18 @@ impl UserRepository {
         Ok(user)
     }
 
+    pub async fn find_by_github_id(&self, github_id: &str) -> Result<User, AppError> {
+        let user = self
+            .collection
+            .find_one(doc! { "github_account.id": github_id }, None)
+            .await?
+            .ok_or(AppError::NotFound(
+                "User not found with GitHub account".to_string(),
+            ))?;
+
+        Ok(user)
+    }
+
     pub async fn find_by_id(&self, id: &ObjectId) -> Result<User, AppError> {
         let user = self
             .collection

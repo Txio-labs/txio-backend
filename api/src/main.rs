@@ -125,6 +125,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         otp_service,
         email_service,
         config.admin_emails.clone(),
+        config.google_oauth.clone(),
+        config.github_oauth.clone(),
+        config.backend_url.clone(),
+        config.frontend_url.clone(),
     );
 
     let collection_service = services::collection_service::CollectionService::new(

@@ -2,7 +2,7 @@ use crate::model::otp::OTP;
 use crate::utils::error::AppError;
 use chrono::Duration as ChronoDuration;
 use mongodb::bson::doc;
-use mongodb::options::{FindOneAndUpdateOptions, IndexOptions, ReturnDocument};
+use mongodb::options::{FindOneAndReplaceOptions, FindOneAndUpdateOptions, IndexOptions, ReturnDocument};
 use mongodb::{Collection, Database, IndexModel};
 use std::time::Duration as StdDuration;
 

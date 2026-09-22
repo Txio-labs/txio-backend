@@ -88,4 +88,15 @@ impl User {
             ..Self::new(email, password_hash)
         }
     }
+
+    pub fn new_github_oauth(
+        email: String,
+        password_hash: String,
+        github_account: GitHubAccount,
+    ) -> Self {
+        Self {
+            github_account: Some(github_account),
+            ..Self::new(email, password_hash)
+        }
+    }
 }

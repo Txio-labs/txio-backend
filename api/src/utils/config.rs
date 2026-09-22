@@ -7,6 +7,20 @@ pub struct Config {
     pub jwt_secret: String,
     pub brevo_api_key: String,
     pub admin_emails: Vec<String>,
+    pub google_oauth: Option<OAuthClientConfig>,
+    pub github_oauth: Option<OAuthClientConfig>,
+    pub backend_url: String,
+    pub frontend_url: String,
+}
+
+/// Client credentials + redirect target for a single OAuth provider.
+/// Optional at the app level: a deployment that hasn't configured a
+/// provider simply won't offer that login/link option, rather than
+/// failing to start.
+#[derive(Debug, Deserialize, Clone)]
+pub struct OAuthClientConfig {
+    pub client_id: String,
+    pub client_secret: String,
 }
 
 impl Config {
@@ -39,13 +53,48 @@ impl Config {
             .map(|raw| parse_admin_emails(&raw))
             .unwrap_or_default();
 
+        let backend_url = config
+            .get_string("BACKEND_URL")
+            .unwrap_or_else(|_| "http://localhost:8000".to_string());
+
+        let frontend_url = config
+            .get_string("FRONTEND_URL")
+            .unwrap_or_else(|_| "http://localhost:3000".to_string());
+
+        let google_oauth = oauth_client_from_env(&config, "GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET");
+        let github_oauth = oauth_client_from_env(&config, "GITHUB_CLIENT_ID", "GITHUB_CLIENT_SECRET");
+
         Ok(Config {
             mongo_uri,
             jwt_secret,
             brevo_api_key,
             admin_emails,
+            google_oauth,
+            github_oauth,
+            backend_url,
+            frontend_url,
         })
     }
+}
+
+/// Reads a provider's client id/secret pair from the environment. Returns
+/// `None` (provider disabled) unless both values are present and non-empty —
+/// a half-configured pair is treated the same as neither being set, rather
+/// than starting up with a client_secret of "".
+fn oauth_client_from_env(
+    config: &config::Config,
+    id_key: &str,
+    secret_key: &str,
+) -> Option<OAuthClientConfig> {
+    let client_id = config.get_string(id_key).ok()?;
+    let client_secret = config.get_string(secret_key).ok()?;
+    if client_id.trim().is_empty() || client_secret.trim().is_empty() {
+        return None;
+    }
+    Some(OAuthClientConfig {
+        client_id,
+        client_secret,
+    })
 }
 
 /// Parses a comma-separated ADMIN_EMAILS env var into a normalized

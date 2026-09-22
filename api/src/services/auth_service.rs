@@ -1,4 +1,3 @@
-use crate::dtos::admin_dtos::RpcLogRequest;
 use crate::dtos::request::{LoginRequest, RegisterUserRequest};
 use crate::dtos::response::{AuthResponse, SessionResponse, UserResponse};
 use crate::model::rpc::RpcLog;
@@ -10,7 +9,7 @@ use crate::repositories::user_repository::UserRepository;
 use crate::services::email_service::EmailService;
 use crate::services::otp_service::OTPService;
 use crate::utils::auth_jwt::{Claims, JwtHelper};
-use crate::utils::config::is_reserved_admin_email;
+use crate::utils::config::{is_reserved_admin_email, OAuthClientConfig};
 use crate::utils::error::AppError;
 use chrono::Utc;
 
@@ -24,6 +23,14 @@ pub struct AuthService {
     email_service: EmailService,
     /// Emails listed in ADMIN_EMAILS — reserved from self-service account creation.
     reserved_admin_emails: Vec<String>,
+    pub google_oauth: Option<OAuthClientConfig>,
+    pub github_oauth: Option<OAuthClientConfig>,
+    /// This deployment's own public base URL — used to build the
+    /// `redirect_uri` sent to OAuth providers, which must exactly match
+    /// what's registered in each provider's app settings.
+    pub backend_url: String,
+    /// Where an OAuth callback redirects the browser back to once done.
+    pub frontend_url: String,
 }
 
 impl AuthService {
@@ -41,9 +48,11 @@ impl AuthService {
             created_at: user.created_at.to_string(),
             notification_preferences: user.notification_preferences.clone(),
             github_account: user.github_account.clone(),
+            google_linked: user.google_sub.is_some(),
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         repo: UserRepository,
         rpc_repo: RpcRepository,
@@ -52,6 +61,10 @@ impl AuthService {
         otp_service: OTPService,
         email_service: EmailService,
         reserved_admin_emails: Vec<String>,
+        google_oauth: Option<OAuthClientConfig>,
+        github_oauth: Option<OAuthClientConfig>,
+        backend_url: String,
+        frontend_url: String,
     ) -> Self {
         Self {
             repo,
@@ -61,6 +74,10 @@ impl AuthService {
             otp_service,
             email_service,
             reserved_admin_emails,
+            google_oauth,
+            github_oauth,
+            backend_url,
+            frontend_url,
         }
     }
 
@@ -373,15 +390,6 @@ impl AuthService {
         Ok(())
     }
 
-    pub async fn log_rpc_call(
-        &self,
-        user_id: mongodb::bson::oid::ObjectId,
-        req: RpcLogRequest,
-    ) -> Result<(), AppError> {
-        let log = RpcLog::new(user_id, req.method, req.params, req.success, req.error);
-        self.rpc_repo.save(&log).await
-    }
-
     pub async fn get_rpc_history(&self, email: &str) -> Result<Vec<RpcLog>, AppError> {
         let user = self.repo.find_by_email(email).await?;
         if let Some(user_id) = user.id {
@@ -411,6 +419,36 @@ impl AuthService {
         let mut user = self.repo.find_by_email(email).await?;
         user.github_account = github_account;
 
+        self.repo.update(&user).await
+    }
+
+    /// Attaches a Google identity to an already-authenticated user (the
+    /// "Connect" flow from the profile page), as opposed to
+    /// `oauth_login_or_register` which logs in/registers standalone.
+    pub async fn link_google_account(
+        &self,
+        email: &str,
+        google_sub: String,
+        google_email: String,
+    ) -> Result<User, AppError> {
+        // Refuse to link a Google identity already claimed by a different
+        // account — otherwise that other account's owner could be silently
+        // locked out of Google sign-in, or two accounts could race to share
+        // one identity.
+        match self.repo.find_by_google_sub(&google_sub).await {
+            Ok(existing) if existing.email != Self::normalize_email(email) => {
+                return Err(AppError::Forbidden(
+                    "This Google account is already linked to a different user".into(),
+                ));
+            }
+            Ok(_) => {} // already linked to this same account — treat as a no-op success
+            Err(AppError::NotFound(_)) => {}
+            Err(e) => return Err(e),
+        }
+
+        let _ = google_email; // the linked identity is keyed by sub; email is informational only
+        let mut user = self.repo.find_by_email(email).await?;
+        user.google_sub = Some(google_sub);
         self.repo.update(&user).await
     }
 
@@ -457,6 +495,66 @@ impl AuthService {
 
         let user_id = user.id.map(|id| id.to_string()).unwrap_or_default();
 
+        let (token, _jti) = self.jwt_helper.generate_token(&user_id, &user.email)?;
+
+        Ok(AuthResponse {
+            token,
+            user: Self::to_user_response(&user),
+        })
+    }
+
+    /// GitHub-equivalent of `oauth_login_or_register`: logs in an existing
+    /// user identified by their GitHub account id, links a GitHub account to
+    /// an existing password account with a matching email, or registers a
+    /// new account. `email` comes from GitHub's `/user/emails` endpoint
+    /// (the `/user` endpoint's `email` field is null for accounts with a
+    /// private email), so it's required here — unlike `link_google_account`,
+    /// this is a standalone login path with no prior session to attach to.
+    pub async fn github_login_or_register(
+        &self,
+        github_account: crate::model::user::GitHubAccount,
+        email: String,
+    ) -> Result<AuthResponse, AppError> {
+        let email = Self::normalize_email(&email);
+
+        let user_by_github_id = match self.repo.find_by_github_id(&github_account.id).await {
+            Ok(u) => Some(u),
+            Err(AppError::NotFound(_)) => None,
+            Err(e) => return Err(e),
+        };
+        let user_by_email = match self.repo.find_by_email(&email).await {
+            Ok(u) => Some(u),
+            Err(AppError::NotFound(_)) => None,
+            Err(e) => return Err(e),
+        };
+
+        let user = match (user_by_github_id, user_by_email) {
+            (Some(existing), _) => existing,
+            (None, Some(existing)) => match &existing.github_account {
+                Some(linked) if linked.id == github_account.id => existing,
+                Some(_) => {
+                    return Err(AppError::Unauthorized(
+                        "This GitHub account is not linked to the existing user".into(),
+                    ));
+                }
+                None => {
+                    return Err(AppError::Forbidden(
+                        "An account with this email already exists. Sign in with your password to link GitHub.".into(),
+                    ));
+                }
+            },
+            (None, None) => {
+                self.reject_reserved_email(&email)?;
+                let random_password = uuid::Uuid::new_v4().to_string();
+                let password_hash = bcrypt::hash(random_password.as_bytes(), bcrypt::DEFAULT_COST)
+                    .map_err(|_| AppError::InternalError("Failed to hash password".into()))?;
+
+                let new_user = User::new_github_oauth(email, password_hash, github_account);
+                self.repo.save(&new_user).await?
+            }
+        };
+
+        let user_id = user.id.map(|id| id.to_string()).unwrap_or_default();
         let (token, _jti) = self.jwt_helper.generate_token(&user_id, &user.email)?;
 
         Ok(AuthResponse {

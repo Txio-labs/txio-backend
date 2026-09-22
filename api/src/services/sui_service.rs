@@ -133,13 +133,12 @@ impl SuiService {
         };
 
         // Log the request
-        let log = RpcLog::new(
-            user_id,
-            method.to_string(),
-            params.clone(),
-            success,
-            error_msg.clone(),
-        );
+        let rpc_result: Result<Value, String> = if success {
+            Ok(full_resp_val.clone())
+        } else {
+            Err(error_msg.clone().unwrap_or_else(|| "RPC call failed".to_string()))
+        };
+        let log = RpcLog::new(user_id, method.to_string(), params.clone(), rpc_result);
 
         if let Err(e) = self.rpc_repo.save(&log).await {
             eprintln!("Failed to save RPC log: {e}");

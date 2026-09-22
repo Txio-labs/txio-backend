@@ -32,7 +32,6 @@ pub struct HistoryEntry {
     pub status: i32,
     pub duration_ms: i64,
 
-    #[serde(with = "mongodb::bson::serde_helpers::chrono_datetime_as_bson_datetime")]
     pub executed_at: DateTime<Utc>,
 }
 
