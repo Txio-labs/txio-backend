@@ -17,54 +17,11 @@ COPY Cargo.toml Cargo.lock ./
 COPY api ./api
 
 # Allow pinning a specific txio-cli ref for reproducible builds; defaults to
-# its default branch.
+# its default branch. txio-cli's own Cargo.toml declares a plain path
+# dependency on this repo's api/ crate at this exact sibling layout
+# (../txio-backend/api), so no patching is needed here.
 ARG TXIO_CLI_REF=main
 RUN git clone --depth 1 --branch "${TXIO_CLI_REF}" https://github.com/Txio-labs/txio-cli.git /workspace/txio-cli
-
-# txio-cli's Cargo.toml was written for a monorepo layout (a shared root
-# workspace with `backend/` and `cli/` as siblings) that predates the repos
-# being split apart. It still uses `*.workspace = true` inheritance and a
-# `path = "../backend/api"` dependency, neither of which resolve once
-# txio-cli and txio-backend are separate repositories/checkouts. Patch the
-# clone's manifest in place (not the real repo) to use explicit values and
-# the actual sibling directory name used in this build.
-RUN sed -i \
-    -e 's/^version\.workspace = true/version = "0.1.0"/' \
-    -e 's/^edition\.workspace = true/edition = "2021"/' \
-    -e 's/^authors\.workspace = true/authors = ["Victor Oladimeji"]/' \
-    -e 's/^license\.workspace = true/license = "MIT"/' \
-    -e 's/^description\.workspace = true/description = "One terminal. Every chain."/' \
-    -e 's#^repository\.workspace = true#repository = "https://github.com/Txio-labs/txio-cli"#' \
-    -e 's#^homepage\.workspace = true#homepage = "https://github.com/Txio-labs/txio-cli"#' \
-    -e 's#txio-api = { path = "\.\./backend/api", version = "[^"]*" }#txio-api = { path = "../txio-backend/api" }#' \
-    /workspace/txio-cli/Cargo.toml
-
-# The remaining `{ workspace = true }` dependency entries need txio-backend's
-# actual pinned versions/features substituted in, since txio-cli has no
-# workspace of its own to inherit them from.
-RUN sed -i \
-    -e 's/^clap = { workspace = true }/clap = { version = "4.6", features = ["derive"] }/' \
-    -e 's/^tokio = { workspace = true }/tokio = { version = "1", features = ["full"] }/' \
-    -e 's/^serde = { workspace = true }/serde = { version = "1", features = ["derive"] }/' \
-    -e 's/^serde_json = { workspace = true }/serde_json = "1"/' \
-    -e 's/^reqwest = { workspace = true }/reqwest = { version = "0.11", features = ["json"] }/' \
-    -e 's/^anyhow = { workspace = true }/anyhow = "1"/' \
-    -e 's/^async-trait = { workspace = true }/async-trait = "0.1"/' \
-    -e 's/^regex = { workspace = true }/regex = "1"/' \
-    -e 's/^dotenvy = { workspace = true }/dotenvy = "0.15"/' \
-    -e 's/^strsim = { workspace = true }/strsim = "0.11"/' \
-    -e 's/^clap_complete = { workspace = true }/clap_complete = "4.6"/' \
-    -e 's/^colored = { workspace = true }/colored = "2.2"/' \
-    -e 's/^indicatif = { workspace = true }/indicatif = "0.17"/' \
-    -e 's/^dirs-next = { workspace = true }/dirs-next = "2.0"/' \
-    -e 's/^dialoguer = { workspace = true }/dialoguer = "0.11"/' \
-    -e 's/^bs58 = { workspace = true }/bs58 = "0.5"/' \
-    /workspace/txio-cli/Cargo.toml
-
-# txio-cli's own Cargo.lock was generated against the pre-split workspace
-# layout and is now stale (different member set), so it has to be
-# regenerated rather than reused.
-RUN rm -f /workspace/txio-cli/Cargo.lock
 
 WORKDIR /workspace/txio-backend
 RUN cargo build --release --package txio-api
