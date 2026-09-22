@@ -36,7 +36,7 @@ RUN sed -i \
     -e 's/^description\.workspace = true/description = "One terminal. Every chain."/' \
     -e 's#^repository\.workspace = true#repository = "https://github.com/Txio-labs/txio-cli"#' \
     -e 's#^homepage\.workspace = true#homepage = "https://github.com/Txio-labs/txio-cli"#' \
-    -e 's#path = "\.\./backend/api"#path = "../txio-backend/api"#' \
+    -e 's#txio-api = { path = "\.\./backend/api", version = "[^"]*" }#txio-api = { path = "../txio-backend/api" }#' \
     /workspace/txio-cli/Cargo.toml
 
 # The remaining `{ workspace = true }` dependency entries need txio-backend's
