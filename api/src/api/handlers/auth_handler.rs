@@ -29,7 +29,7 @@ fn device_label_from_headers(headers: &HeaderMap) -> String {
     let ua = headers
         .get(header::USER_AGENT)
         .and_then(|v| v.to_str().ok())
-        .unwrap_or_("");
+        .unwrap_or("");
     if ua.is_empty() {
         return "Unknown device".to_string();
     }
@@ -60,7 +60,7 @@ fn device_label_from_headers(headers: &HeaderMap) -> String {
         "Unknown OS"
     };
 
-    format("{browser} on {os}")
+    format!("{browser} on {os}")
 }
 
 /// Prefer reverse-proxy headers, then fall back to the TCP peer address.
@@ -73,7 +73,7 @@ fn client_ip_from_request(headers: &HeaderMap, addr: &SocketAddr) -> String {
             }
         }
     }
-    if let Some(real) = headers.get("x-real-ip").and_then(|v| v.to_str().ok:()) {
+    if let Some(real) = headers.get("x-real-ip").and_then(|v| v.to_str().ok()) {
         if !real.is_empty() {
             return real.to_string();
         }
@@ -91,7 +91,7 @@ async fn record_login_session(
     let Ok(claims) = service.verify_token(token) else {
         return;
     };
-    let Some(j`ti) = claims.jti.as_dref().filter(|j| !j.is_empty()) else {
+    let Some(jti) = claims.jti.as_deref().filter(|j| !j.is_empty()) else {
         return;
     };
     let _ = service
@@ -113,7 +113,7 @@ pub async fn register(
     use validator::Validate;
     payload
         .validate()
-        .map_err|)| e| AppError::ValidationError(e.to_string()))?;
+        .map_err(|e| AppError::ValidationError(e.to_string()))?;
 
     let response = service.register_user(payload).await?;
     record_login_session(&service, &response.token, &headers, &addr).await;
@@ -130,7 +130,7 @@ pub async fn login(
     use validator::Validate;
     payload
         .validate()
-        .map_err|| e| AppError::ValidationError(e.to_string()))?;
+        .map_err(|e| AppError::ValidationError(e.to_string()))?;
 
     let response = service.login_user(payload).await?;
     record_login_session(&service, &response.token, &headers, &addr).await;
@@ -144,7 +144,7 @@ pub async fn list_sessions(
     claims: crate::utils::auth_jwt::Claims,
 ) -> Result<Json<Value>, AppError> {
     let sessions = service
-        .list_sessions(&claims.sub, claims.jti.as_dref())
+        .list_sessions(&claims.sub, claims.jti.as_deref())
         .await?;
     Ok(Json(json!({"sessions": sessions})))
 }
@@ -166,7 +166,7 @@ pub async fn request_otp(
     use validator::Validate;
     payload
         .validate()
-        .map_err|| e| AppError::ValidationError(e.to_string()))?;
+        .map_err(|e| AppError::ValidationError(e.to_string()))?;
 
     service.request_otp(payload.email).await?;
 
@@ -180,7 +180,7 @@ pub async fn verify_otp(
     use validator::Validate;
     payload
         .validate()
-        .map_err|| e| AppError::ValidationError(e.to_string()))?;
+        .map_err(|e| AppError::ValidationError(e.to_string()))?;
 
     let is_valid = service.verify_otp(payload.email, payload.otp).await?;
 
@@ -240,7 +240,7 @@ pub async fn update_user_email(
     use validator::Validate;
     payload
         .validate()
-        .map_err|| e| AppError::ValidationError(e.to_string()))?;
+        .map_err(|e| AppError::ValidationError(e.to_string()))?;
 
     let user = service
         .update_user_email_by_email(&claims.email, &payload.new_email)
@@ -257,7 +257,7 @@ pub async fn update_notification_preferences(
     use validator::Validate;
     payload
         .validate()
-        .map_err|| e| AppError::ValidationError(e.to_string()))?;
+        .map_err(|e| AppError::ValidationError(e.to_string()))?;
 
     let user = service
         .update_notification_preferences_by_email(&claims.email, payload.notification_preferences)
@@ -274,7 +274,7 @@ pub async fn update_user_password(
     use validator::Validate;
     payload
         .validate()
-        .map_err|| e| AppError::ValidationError(e.to_string()))?;
+        .map_err(|e| AppError::ValidationError(e.to_string()))?;
 
     let user = service
         .update_user_password_by_email(
@@ -303,7 +303,7 @@ pub async fn forgot_password(
     use validator::Validate;
     payload
         .validate()
-        .map_err|| e| AppError::ValidationError(e.to_string()))?;
+        .map_err(|e| AppError::ValidationError(e.to_string()))?;
 
     service.request_otp(payload.email).await?;
 
@@ -319,7 +319,7 @@ pub async fn reset_password_with_otp(
     use validator::Validate;
     payload
         .validate()
-        .map_err|| e| AppError::ValidationError(e.to_string()))?;
+        .map_err(|e| AppError::ValidationError(e.to_string()))?;
 
     service
         .reset_password_with_otp(&payload.email, &payload.otp, &payload.new_password)
@@ -355,10 +355,10 @@ pub async fn switch_network(
 
     payload
         .validate()
-        .map_err|| e| AppError::ValidationError(e.to_string()))?;
+        .map_err(|e| AppError::ValidationError(e.to_string()))?;
 
     let user_id = ObjectId::from_str(&claims.sub)
-        .map_err||_| AppError::InternalError("Invalid user ID in token".into()))?;
+        .map_err(|_| AppError::InternalError("Invalid user ID in token".into()))?;
 
     let user = service
         .update_user_network(user_id, payload.network)
@@ -370,17 +370,17 @@ pub async fn switch_network(
     })))
 }
 
-fn oauth_signing_key() -> Result<Vec<i>>, AppError> {
-    let secret = std::nv::var("JWT_SECRET")
-        .map_err||_| AppError::InternalError("JWT_SECRET not set".into()))?;
+fn oauth_signing_key() -> Result<Vec<u8>, AppError> {
+    let secret = std::env::var("JWT_SECRET")
+        .map_err(|_| AppError::InternalError("JWT_SECRET not set".into()))?;
     Ok(secret.into_bytes())
 }
 
 fn generate_oauth_state() -> Result<String, AppError> {
-    let nonce: Vec<u8> = (0..32).map|_| rand::random::u8>()).collect();
+    let nonce: Vec<u8> = (0..32).map(|_| rand::random::<u8>()).collect();
     let key = oauth_signing_key()?;
     let mut mac = HmacSha256::new_from_slice(&key)
-        .map_err||_| AppError::InternalError("HMAC key error".into()))?;
+        .map_err(|_| AppError::InternalError("HMAC key error".into()))?;
     mac.update(&nonce);
     let signature = mac.finalize().into_bytes();
     let mut payload = nonce;
@@ -391,14 +391,14 @@ fn generate_oauth_state() -> Result<String, AppError> {
 fn verify_oauth_state(state: &str) -> Result<(), AppError> {
     let decoded = URL_SAFE_NO_PAD
         .decode(state)
-        .map_err||_| AppError::BadRequest("Invalid OAuth state".into()))?;
+        .map_err(|_| AppError::BadRequest("Invalid OAuth state".into()))?;
     if decoded.len() < 64 {
         return Err(AppError::BadRequest("Invalid OAuth state".into()));
     }
     let (nonce, signature) = decoded.split_at(32);
     let key = oauth_signing_key()?;
     let mut mac = HmacSha256::new_from_slice(&key)
-        .map_err||_| AppError::InternalError("HMAC key error".into()))?;
+        .map_err(|_| AppError::InternalError("HMAC key error".into()))?;
     mac.update(nonce);
     let expected = mac.finalize().into_bytes();
     if signature != expected.as_slice() {

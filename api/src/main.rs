@@ -102,6 +102,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let session_repo = repositories::session_repository::SessionRepository::new(&db);
 
+    let history_repo = repositories::history_repository::HistoryRepository::new(&db);
+    history_repo.ensure_indices().await?;
+
     // 5. Initialize JWT Helper
     let jwt_helper = utils::auth_jwt::JwtHelper::new(config.jwt_secret);
 
@@ -131,6 +134,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         workspace_repo.clone(),
         sui_service,
     );
+
+    let history_service =
+        services::history_service::HistoryService::new(history_repo, workspace_repo.clone());
 
     let workspace_service =
         services::workspace_service::WorkspaceService::new(workspace_repo, collection_repo);
@@ -231,6 +237,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             api::routers::collection_router::router(collection_service),
         )
         .nest(
+            "/api/v1/history",
+            api::routers::history_router::router(history_service),
+        )
+        .nest(
             "/api/v1/workspaces",
             api::routers::workspace_router::router(workspace_service),
         )
@@ -256,7 +266,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             config: governor_conf,
         })
         .layer(axum::Extension(jwt_helper))
-        .layer(cors);
+        .layer(cors)
+        .layer(tower_http::trace::TraceLayer::new_for_http());
 
     // 8. Run Server
     let port = std::env::var("PORT")
