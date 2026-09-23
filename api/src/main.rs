@@ -158,6 +158,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         user_repo.clone(),
         rpc_repo.clone(),
         session_repo,
+        repositories::admin_repository::AdminRepository::new(&db),
     );
 
     let terminal_service = services::terminal_service::TerminalService::new();

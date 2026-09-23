@@ -1,5 +1,9 @@
-use crate::dtos::admin_dtos::{AdminLogEntry, AdminStatsResponse};
+use crate::dtos::admin_dtos::{
+    AdminCollectionEntry, AdminLogEntry, AdminOverviewResponse, AdminRequestEntry,
+    AdminStatsResponse, AdminUserEntry,
+};
 use crate::model::user::User;
+use crate::repositories::admin_repository::AdminRepository;
 use crate::repositories::rpc_repository::RpcRepository;
 use crate::repositories::session_repository::SessionRepository;
 use crate::repositories::user_repository::UserRepository;
@@ -12,6 +16,7 @@ pub struct AdminService {
     user_repo: UserRepository,
     rpc_repo: RpcRepository,
     session_repo: SessionRepository,
+    admin_repo: AdminRepository,
 }
 
 impl AdminService {
@@ -19,11 +24,13 @@ impl AdminService {
         user_repo: UserRepository,
         rpc_repo: RpcRepository,
         session_repo: SessionRepository,
+        admin_repo: AdminRepository,
     ) -> Self {
         Self {
             user_repo,
             rpc_repo,
             session_repo,
+            admin_repo,
         }
     }
 
@@ -49,22 +56,49 @@ impl AdminService {
         self.user_repo.list_all_emails().await
     }
 
+    /// Guards an admin-initiated deletion: admins can't remove themselves
+    /// (no lock-out by misclick) or other admins (demotion is an ops task).
+    pub(crate) fn ensure_deletable(actor_id: &ObjectId, target: &User) -> Result<(), AppError> {
+        if target.id.as_ref() == Some(actor_id) {
+            return Err(AppError::BadRequest(
+                "You can't delete your own account from the admin dashboard".into(),
+            ));
+        }
+        if target.is_admin {
+            return Err(AppError::Forbidden(
+                "Admin accounts can't be deleted from the dashboard".into(),
+            ));
+        }
+        Ok(())
+    }
+
     pub async fn delete_user(&self, claims: &Claims, email: &str) -> Result<String, AppError> {
         self.require_admin(claims).await?;
+        let actor_id = ObjectId::parse_str(&claims.sub)
+            .map_err(|_| AppError::Unauthorized("Invalid token subject".into()))?;
 
-        let user = self.user_repo.find_by_email(email).await?;
-        let user_id = user
+        let user = self
+            .user_repo
+            .find_by_email(&email.trim().to_ascii_lowercase())
+            .await?;
+        Self::ensure_deletable(&actor_id, &user)?;
+        let oid = user
             .id
-            .map(|id| id.to_hex())
             .ok_or_else(|| AppError::InternalError("User ID missing".into()))?;
 
-        // Clean up all sessions before deleting the account, matching the
-        // ordering and fail-closed error propagation in AuthService::delete_user_by_email.
-        let oid = ObjectId::parse_str(&user_id)
-            .map_err(|_| AppError::InternalError("Invalid user ID".into()))?;
+        // Sessions first so the account loses access immediately; then owned
+        // data; the user document last, so any failure leaves an account an
+        // admin can find and retry rather than orphaned data with no owner.
         self.session_repo.delete_all_by_user_id(&oid).await?;
+        let removed = self.admin_repo.purge_user_data(oid).await?;
+        let deleted = self.user_repo.delete_by_id(&oid.to_hex()).await?;
 
-        let deleted = self.user_repo.delete_by_id(&user_id).await?;
+        tracing::info!(
+            actor = %claims.sub,
+            deleted_user = %oid,
+            ?removed,
+            "Admin deleted user"
+        );
         Ok(deleted.email)
     }
 
@@ -88,15 +122,52 @@ impl AdminService {
         self.require_admin(claims).await?;
 
         let logs = self.rpc_repo.find_recent(limit).await?;
+        let emails = self
+            .admin_repo
+            .emails_for(logs.iter().map(|log| log.user_id))
+            .await?;
         Ok(logs
             .into_iter()
             .map(|log| AdminLogEntry {
+                user_email: emails.get(&log.user_id).cloned(),
                 method: log.method,
                 success: log.success,
                 error: log.error,
                 timestamp: log.timestamp.to_rfc3339(),
             })
             .collect())
+    }
+
+    pub async fn overview(&self, claims: &Claims) -> Result<AdminOverviewResponse, AppError> {
+        self.require_admin(claims).await?;
+        self.admin_repo.overview().await
+    }
+
+    pub async fn list_accounts(
+        &self,
+        claims: &Claims,
+        limit: i64,
+    ) -> Result<Vec<AdminUserEntry>, AppError> {
+        self.require_admin(claims).await?;
+        self.admin_repo.list_users(limit).await
+    }
+
+    pub async fn recent_requests(
+        &self,
+        claims: &Claims,
+        limit: i64,
+    ) -> Result<Vec<AdminRequestEntry>, AppError> {
+        self.require_admin(claims).await?;
+        self.admin_repo.recent_requests(limit).await
+    }
+
+    pub async fn list_collections(
+        &self,
+        claims: &Claims,
+        limit: i64,
+    ) -> Result<Vec<AdminCollectionEntry>, AppError> {
+        self.require_admin(claims).await?;
+        self.admin_repo.list_collections(limit).await
     }
 }
 
@@ -122,6 +193,35 @@ mod tests {
             AdminService::ensure_admin_flag(&sample_user(false)),
             Err(AppError::Forbidden(_))
         ));
+    }
+
+    #[test]
+    fn ensure_deletable_rejects_self() {
+        let mut me = sample_user(true);
+        let id = ObjectId::new();
+        me.id = Some(id);
+        me.is_admin = false;
+        assert!(matches!(
+            AdminService::ensure_deletable(&id, &me),
+            Err(AppError::BadRequest(_))
+        ));
+    }
+
+    #[test]
+    fn ensure_deletable_rejects_other_admins() {
+        let mut other = sample_user(true);
+        other.id = Some(ObjectId::new());
+        assert!(matches!(
+            AdminService::ensure_deletable(&ObjectId::new(), &other),
+            Err(AppError::Forbidden(_))
+        ));
+    }
+
+    #[test]
+    fn ensure_deletable_allows_regular_users() {
+        let mut user = sample_user(false);
+        user.id = Some(ObjectId::new());
+        assert!(AdminService::ensure_deletable(&ObjectId::new(), &user).is_ok());
     }
 
     #[test]

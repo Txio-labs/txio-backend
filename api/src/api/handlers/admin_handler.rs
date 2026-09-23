@@ -1,5 +1,6 @@
 use crate::dtos::admin_dtos::{
-    AdminDeleteUserRequest, AdminLogEntry, AdminStatsResponse, AdminUsersResponse,
+    AdminCollectionEntry, AdminDeleteUserRequest, AdminLogEntry, AdminOverviewResponse,
+    AdminRequestEntry, AdminStatsResponse, AdminUserEntry, AdminUsersResponse,
 };
 use crate::services::admin_service::AdminService;
 use crate::utils::auth_jwt::Claims;
@@ -16,6 +17,15 @@ pub struct LogsQuery {
 
 const DEFAULT_LOG_LIMIT: i64 = 20;
 const MAX_LOG_LIMIT: i64 = 200;
+const DEFAULT_LIST_LIMIT: i64 = 100;
+const MAX_LIST_LIMIT: i64 = 500;
+
+fn list_limit(query: &LogsQuery) -> i64 {
+    query
+        .limit
+        .unwrap_or(DEFAULT_LIST_LIMIT)
+        .clamp(1, MAX_LIST_LIMIT)
+}
 
 pub async fn list_users(
     State(service): State<AdminService>,
@@ -60,4 +70,35 @@ pub async fn list_logs(
         .clamp(1, MAX_LOG_LIMIT);
     let logs = service.list_logs(&claims, limit).await?;
     Ok(Json(logs))
+}
+
+pub async fn overview(
+    State(service): State<AdminService>,
+    claims: Claims,
+) -> Result<Json<AdminOverviewResponse>, AppError> {
+    Ok(Json(service.overview(&claims).await?))
+}
+
+pub async fn list_accounts(
+    State(service): State<AdminService>,
+    claims: Claims,
+    axum::extract::Query(query): axum::extract::Query<LogsQuery>,
+) -> Result<Json<Vec<AdminUserEntry>>, AppError> {
+    Ok(Json(service.list_accounts(&claims, list_limit(&query)).await?))
+}
+
+pub async fn list_requests(
+    State(service): State<AdminService>,
+    claims: Claims,
+    axum::extract::Query(query): axum::extract::Query<LogsQuery>,
+) -> Result<Json<Vec<AdminRequestEntry>>, AppError> {
+    Ok(Json(service.recent_requests(&claims, list_limit(&query)).await?))
+}
+
+pub async fn list_collections(
+    State(service): State<AdminService>,
+    claims: Claims,
+    axum::extract::Query(query): axum::extract::Query<LogsQuery>,
+) -> Result<Json<Vec<AdminCollectionEntry>>, AppError> {
+    Ok(Json(service.list_collections(&claims, list_limit(&query)).await?))
 }

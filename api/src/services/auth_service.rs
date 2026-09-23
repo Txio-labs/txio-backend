@@ -51,6 +51,7 @@ impl AuthService {
             notification_preferences: user.notification_preferences.clone(),
             github_account: user.github_account.clone(),
             google_linked: user.google_sub.is_some(),
+            is_admin: user.is_admin,
         }
     }
 
@@ -666,6 +667,7 @@ mod oauth_tests {
             id: Some(ObjectId::new()),
             email: email.to_string(),
             password_hash: "hash".to_string(),
+            display_name: None,
             google_sub: google_sub.map(str::to_string),
             tier: crate::model::user::PlanTier::Free,
             network: crate::model::network::Network::Mainnet,
