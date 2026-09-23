@@ -299,7 +299,10 @@ pub async fn google_callback(
 ) -> impl IntoResponse {
     match google_callback_inner(&service, query).await {
         Ok(token) => oauth_success_redirect(&service.frontend_url, &token),
-        Err(e) => oauth_error_redirect(&service.frontend_url, &e.to_string()),
+        Err(e) => {
+            tracing::error!("Google OAuth callback failed: {e}");
+            oauth_error_redirect(&service.frontend_url, e.user_message())
+        }
     }
 }
 
@@ -444,7 +447,10 @@ pub async fn github_callback(
             "{}/workspace#github_connected=1",
             service.frontend_url.trim_end_matches('/')
         )),
-        Err(e) => oauth_error_redirect(&service.frontend_url, &e.to_string()),
+        Err(e) => {
+            tracing::error!("GitHub OAuth callback failed: {e}");
+            oauth_error_redirect(&service.frontend_url, e.user_message())
+        }
     }
 }
 
