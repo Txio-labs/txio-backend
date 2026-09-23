@@ -61,4 +61,33 @@ impl WorkspaceRepository {
 
         result.ok_or_else(|| AppError::NotFound(format!("Workspace not found with id: {id}")))
     }
+
+    pub async fn count_by_user(&self, user_id: ObjectId) -> Result<u64, AppError> {
+        self.collection
+            .count_documents(doc! { "user_id": user_id }, None)
+            .await
+            .map_err(AppError::Database)
+    }
+
+    pub async fn update(&self, workspace: &Workspace) -> Result<Workspace, AppError> {
+        let id = workspace.id.ok_or(AppError::InternalError(
+            "Cannot update workspace without ID".into(),
+        ))?;
+        let filter = doc! { "_id": id };
+
+        self.collection.replace_one(filter, workspace, None).await?;
+        Ok(workspace.clone())
+    }
+
+    pub async fn delete(&self, id: ObjectId) -> Result<(), AppError> {
+        let filter = doc! { "_id": id };
+        let result = self.collection.delete_one(filter, None).await?;
+
+        if result.deleted_count == 0 {
+            return Err(AppError::NotFound(format!(
+                "Workspace not found for deletion: {id}"
+            )));
+        }
+        Ok(())
+    }
 }

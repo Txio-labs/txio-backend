@@ -130,6 +130,28 @@ impl CollectionRepository {
         Ok(())
     }
 
+    pub async fn find_all_by_workspace(
+        &self,
+        workspace_id: ObjectId,
+    ) -> Result<Vec<Collection>, AppError> {
+        let filter = doc! { "workspace_id": workspace_id };
+        let mut cursor = self.collection.find(filter, None).await?;
+
+        let mut collections = Vec::new();
+        while cursor.advance().await? {
+            let c: Collection = cursor.deserialize_current().map_err(AppError::Database)?;
+            collections.push(c);
+        }
+
+        Ok(collections)
+    }
+
+    pub async fn delete_all_by_workspace(&self, workspace_id: ObjectId) -> Result<(), AppError> {
+        let filter = doc! { "workspace_id": workspace_id };
+        self.collection.delete_many(filter, None).await?;
+        Ok(())
+    }
+
     pub async fn assign_workspace_to_unscoped_user_collections(
         &self,
         user_id: ObjectId,

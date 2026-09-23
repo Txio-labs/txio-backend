@@ -35,7 +35,9 @@ pub struct AuthService {
 
 impl AuthService {
     fn to_user_response(user: &User) -> UserResponse {
-        let name = user.email.split('@').next().unwrap_or("user").to_string();
+        let name = user.display_name.clone().unwrap_or_else(|| {
+            user.email.split('@').next().unwrap_or("user").to_string()
+        });
 
         UserResponse {
             id: user
@@ -407,6 +409,17 @@ impl AuthService {
     ) -> Result<UserResponse, AppError> {
         let mut user = self.repo.find_by_id(&user_id).await?;
         user.network = network;
+        let updated_user = self.repo.update(&user).await?;
+        Ok(Self::to_user_response(&updated_user))
+    }
+
+    pub async fn update_display_name(
+        &self,
+        user_id: mongodb::bson::oid::ObjectId,
+        display_name: String,
+    ) -> Result<UserResponse, AppError> {
+        let mut user = self.repo.find_by_id(&user_id).await?;
+        user.display_name = Some(display_name);
         let updated_user = self.repo.update(&user).await?;
         Ok(Self::to_user_response(&updated_user))
     }

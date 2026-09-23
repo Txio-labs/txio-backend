@@ -57,6 +57,7 @@ pub fn router(service: AuthService) -> Router {
         )
         .route("/profile", axum::routing::get(auth_handler::profile))
         .route("/get-user-profile", post(auth_handler::get_user_profile))
+        .route("/update-profile", post(auth_handler::update_profile))
         .route("/update-email", post(auth_handler::update_user_email))
         .route("/update-password", post(auth_handler::update_user_password))
         .route(

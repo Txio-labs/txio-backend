@@ -77,6 +77,12 @@ pub struct SwitchNetworkRequest {
 pub struct UpdateNotificationPreferencesRequest {
     pub notification_preferences: NotificationPreferences,
 }
+
+#[derive(Debug, Deserialize, Validate)]
+pub struct UpdateProfileRequest {
+    #[validate(length(min = 1, max = 64, message = "Name must be between 1 and 64 characters"))]
+    pub name: String,
+}
 #[derive(Debug, Deserialize, Validate)]
 pub struct TerminalCommandRequest {
     #[validate(length(min = 1))]

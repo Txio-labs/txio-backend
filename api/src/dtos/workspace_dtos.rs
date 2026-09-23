@@ -17,3 +17,13 @@ pub struct CreateWorkspaceRequest {
 pub struct WorkspaceQuery {
     pub workspace_id: Option<String>,
 }
+
+#[derive(Debug, Deserialize, Validate)]
+pub struct UpdateWorkspaceRequest {
+    #[validate(length(
+        min = 2,
+        max = 48,
+        message = "Workspace name must be between 2 and 48 characters"
+    ))]
+    pub name: String,
+}

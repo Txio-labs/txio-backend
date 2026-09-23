@@ -2,7 +2,7 @@ use crate::dtos::{
     request::{
         LoginRequest, OTPRequest, RegisterUserRequest, ResetPasswordWithOTPRequest,
         SwitchNetworkRequest, UpdateEmailRequest, UpdateNotificationPreferencesRequest,
-        UpdatePasswordRequest, VerifyOTPRequest,
+        UpdatePasswordRequest, UpdateProfileRequest, VerifyOTPRequest,
     },
     response::{AuthResponse, UserResponse},
 };
@@ -746,6 +746,32 @@ pub async fn switch_network(
 
     Ok(Json(json!({
         "message": "Network switched successfully",
+        "user": user
+    })))
+}
+
+pub async fn update_profile(
+    State(service): State<AuthService>,
+    claims: crate::utils::auth_jwt::Claims,
+    Json(payload): Json<UpdateProfileRequest>,
+) -> Result<Json<Value>, AppError> {
+    use mongodb::bson::oid::ObjectId;
+    use std::str::FromStr;
+    use validator::Validate;
+
+    payload
+        .validate()
+        .map_err(|e| AppError::ValidationError(e.to_string()))?;
+
+    let user_id = ObjectId::from_str(&claims.sub)
+        .map_err(|_| AppError::InternalError("Invalid user ID in token".into()))?;
+
+    let user = service
+        .update_display_name(user_id, payload.name.trim().to_string())
+        .await?;
+
+    Ok(Json(json!({
+        "message": "Profile updated successfully",
         "user": user
     })))
 }

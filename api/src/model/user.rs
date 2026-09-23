@@ -18,6 +18,11 @@ pub struct User {
     pub id: Option<ObjectId>,
     pub email: String,
     pub password_hash: String,
+    /// User-chosen display name. Falls back to the email's local part
+    /// (`to_user_response`) when unset, so every account has a sensible
+    /// name even before the user visits their profile settings.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub display_name: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub google_sub: Option<String>,
     pub tier: PlanTier,
@@ -75,6 +80,7 @@ impl User {
             id: None,
             email,
             password_hash,
+            display_name: None,
             google_sub: None,
             tier: PlanTier::Free,
             network: Network::default(),

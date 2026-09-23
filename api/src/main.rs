@@ -133,17 +133,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let collection_service = services::collection_service::CollectionService::new(
         collection_repo.clone(),
-        request_repo,
+        request_repo.clone(),
         user_repo.clone(),
         workspace_repo.clone(),
         sui_service,
     );
 
-    let history_service =
-        services::history_service::HistoryService::new(history_repo, workspace_repo.clone());
+    let history_service = services::history_service::HistoryService::new(
+        history_repo.clone(),
+        workspace_repo.clone(),
+    );
 
-    let workspace_service =
-        services::workspace_service::WorkspaceService::new(workspace_repo, collection_repo);
+    let workspace_service = services::workspace_service::WorkspaceService::new(
+        workspace_repo,
+        collection_repo,
+        request_repo,
+        history_repo,
+    );
 
     let recipe_template_service =
         services::recipe_template_service::RecipeTemplateService::new(recipe_template_repo);
