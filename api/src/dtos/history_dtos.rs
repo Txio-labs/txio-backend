@@ -19,6 +19,8 @@ pub struct CreateHistoryEntryRequest {
 
     pub method: Option<String>,
     pub params: Option<Value>,
+    pub tx_params: Option<Value>,
+    pub result: Option<Value>,
     pub status: i32,
     pub duration_ms: i64,
 }

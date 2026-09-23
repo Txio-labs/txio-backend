@@ -47,6 +47,8 @@ impl HistoryService {
         network: String,
         method: Option<String>,
         params: Option<Value>,
+        tx_params: Option<Value>,
+        result_data: Option<Value>,
         status: i32,
         duration_ms: i64,
     ) -> Result<HistoryEntry, AppError> {
@@ -63,6 +65,8 @@ impl HistoryService {
             network,
             method,
             params,
+            tx_params,
+            result_data,
             status,
             duration_ms,
         );

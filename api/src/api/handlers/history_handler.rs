@@ -40,6 +40,8 @@ pub async fn create_history_entry(
             payload.network,
             payload.method,
             payload.params,
+            payload.tx_params,
+            payload.result,
             payload.status,
             payload.duration_ms,
         )

@@ -29,6 +29,19 @@ pub struct HistoryEntry {
     pub method: Option<String>,
     pub params: Option<Value>,
 
+    /// Chain-native transaction params (Sui moveParams, EVM evmTxParams,
+    /// Solana solanaTxParams, Stellar stellarTxParams) for a TRANSACTION
+    /// entry — opaque to the backend, replayed as-is by the frontend.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tx_params: Option<Value>,
+
+    /// The execution outcome: tx hash, gas paid, decoded events, explorer
+    /// URL, or the error — whatever transactionService.ts produced. Opaque
+    /// to the backend; lets a reopened history entry show what happened
+    /// without re-running the transaction.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub result: Option<Value>,
+
     pub status: i32,
     pub duration_ms: i64,
 
@@ -47,6 +60,8 @@ impl HistoryEntry {
         network: String,
         method: Option<String>,
         params: Option<Value>,
+        tx_params: Option<Value>,
+        result: Option<Value>,
         status: i32,
         duration_ms: i64,
     ) -> Self {
@@ -60,6 +75,8 @@ impl HistoryEntry {
             network,
             method,
             params,
+            tx_params,
+            result,
             status,
             duration_ms,
             executed_at: Utc::now(),
