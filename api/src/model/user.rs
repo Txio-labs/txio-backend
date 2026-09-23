@@ -23,6 +23,7 @@ pub struct User {
     pub tier: PlanTier,
     #[serde(default)]
     pub network: Network,
+    #[serde(with = "mongodb::bson::serde_helpers::chrono_datetime_as_bson_datetime")]
     pub created_at: DateTime<Utc>,
     #[serde(default)]
     pub github_account: Option<GitHubAccount>,
@@ -30,7 +31,11 @@ pub struct User {
     pub notification_preferences: NotificationPreferences,
     #[serde(default)]
     pub failed_login_attempts: i32,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        with = "mongodb::bson::serde_helpers::chrono_datetime_as_bson_datetime_optional"
+    )]
     pub locked_until: Option<DateTime<Utc>>,
     /// Durable admin privilege. Set only via out-of-band bootstrap — never by
     /// matching `claims.email` against `ADMIN_EMAILS` at request time.

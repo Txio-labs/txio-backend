@@ -10,6 +10,7 @@ pub struct RpcLog {
     pub user_id: ObjectId,
     pub method: String,
     pub params: Value,
+    #[serde(with = "mongodb::bson::serde_helpers::chrono_datetime_as_bson_datetime")]
     pub timestamp: DateTime<Utc>,
     pub success: bool,
     pub error: Option<String>,

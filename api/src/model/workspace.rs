@@ -19,7 +19,9 @@ pub struct Workspace {
     pub workspace_type: WorkspaceType,
     #[serde(default)]
     pub active_env_id: Option<String>,
+    #[serde(with = "mongodb::bson::serde_helpers::chrono_datetime_as_bson_datetime")]
     pub created_at: DateTime<Utc>,
+    #[serde(with = "mongodb::bson::serde_helpers::chrono_datetime_as_bson_datetime")]
     pub updated_at: DateTime<Utc>,
 }
 

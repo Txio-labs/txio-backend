@@ -23,9 +23,15 @@ pub struct SavedRequest {
     pub rpc_url: Option<String>,
 
     pub last_response: Option<serde_json::Value>,
+    #[serde(
+        default,
+        with = "mongodb::bson::serde_helpers::chrono_datetime_as_bson_datetime_optional"
+    )]
     pub last_executed_at: Option<DateTime<Utc>>,
 
+    #[serde(with = "mongodb::bson::serde_helpers::chrono_datetime_as_bson_datetime")]
     pub created_at: DateTime<Utc>,
+    #[serde(with = "mongodb::bson::serde_helpers::chrono_datetime_as_bson_datetime")]
     pub updated_at: DateTime<Utc>,
 }
 

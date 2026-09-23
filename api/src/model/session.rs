@@ -29,10 +29,12 @@ pub struct Session {
     pub ip_address: String,
 
     /// When the session (and the matching JWT) was created.
+    #[serde(with = "mongodb::bson::serde_helpers::chrono_datetime_as_bson_datetime")]
     pub created_at: DateTime<Utc>,
 
     /// Timestamp updated each time the session owner makes an authenticated
     /// request (optional future enhancement — populated at creation for now).
+    #[serde(with = "mongodb::bson::serde_helpers::chrono_datetime_as_bson_datetime")]
     pub last_active_at: DateTime<Utc>,
 }
 

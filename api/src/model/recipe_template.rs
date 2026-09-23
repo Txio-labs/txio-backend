@@ -25,7 +25,9 @@ pub struct RecipeTemplate {
     #[serde(default)]
     pub payload: serde_json::Value,
 
+    #[serde(with = "mongodb::bson::serde_helpers::chrono_datetime_as_bson_datetime")]
     pub created_at: DateTime<Utc>,
+    #[serde(with = "mongodb::bson::serde_helpers::chrono_datetime_as_bson_datetime")]
     pub updated_at: DateTime<Utc>,
 }
 
