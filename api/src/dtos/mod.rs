@@ -5,4 +5,8 @@ pub mod history_dtos;
 pub mod recipe_template_dtos;
 pub mod request;
 pub mod response;
+pub mod scheduled_task_dtos;
+pub mod session_key_dtos;
+pub mod spend_policy_dtos;
+pub mod webhook_subscription_dtos;
 pub mod workspace_dtos;

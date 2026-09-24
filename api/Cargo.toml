@@ -37,6 +37,9 @@ base64 = { workspace = true }
 hmac = { workspace = true }
 sha2 = { workspace = true }
 urlencoding = { workspace = true }
+aes-gcm = { workspace = true }
+alloy = { workspace = true }
+hex = { workspace = true }
 url = "2.5"
 serde_with = "3.8"
 

@@ -11,6 +11,12 @@ pub struct Config {
     pub github_oauth: Option<OAuthClientConfig>,
     pub backend_url: String,
     pub frontend_url: String,
+    /// Symmetric key (AES-256-GCM) session keys' ephemeral automation
+    /// signers are encrypted with at rest — see utils::session_key_crypto.
+    /// Distinct from JWT_SECRET: rotating one must not force-rotate the
+    /// other, since they protect very different things (login tokens vs.
+    /// funds-capable automation keys).
+    pub session_key_encryption_key: String,
 }
 
 /// Client credentials + redirect target for a single OAuth provider.
@@ -48,6 +54,16 @@ impl Config {
             ));
         }
 
+        let session_key_encryption_key = config
+            .get_string("SESSION_KEY_ENCRYPTION_KEY")
+            .map_err(|_| ConfigError::Message("SESSION_KEY_ENCRYPTION_KEY must be set".into()))?;
+
+        if session_key_encryption_key.len() < 32 {
+            return Err(ConfigError::Message(
+                "SESSION_KEY_ENCRYPTION_KEY must be at least 32 characters".into(),
+            ));
+        }
+
         let admin_emails = config
             .get_string("ADMIN_EMAILS")
             .map(|raw| parse_admin_emails(&raw))
@@ -73,6 +89,7 @@ impl Config {
             github_oauth,
             backend_url,
             frontend_url,
+            session_key_encryption_key,
         })
     }
 }

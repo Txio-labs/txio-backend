@@ -105,6 +105,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let history_repo = repositories::history_repository::HistoryRepository::new(&db);
     history_repo.ensure_indices().await?;
 
+    let spend_policy_repo = repositories::spend_policy_repository::SpendPolicyRepository::new(&db);
+    spend_policy_repo.ensure_indices().await?;
+
+    let session_key_repo = repositories::session_key_repository::SessionKeyRepository::new(&db);
+    session_key_repo.ensure_indices().await?;
+
+    let scheduled_task_repo = repositories::scheduled_task_repository::ScheduledTaskRepository::new(&db);
+    scheduled_task_repo.ensure_indices().await?;
+
+    let webhook_subscription_repo =
+        repositories::webhook_subscription_repository::WebhookSubscriptionRepository::new(&db);
+    webhook_subscription_repo.ensure_indices().await?;
+
     // 5. Initialize JWT Helper
     let jwt_helper = utils::auth_jwt::JwtHelper::new(config.jwt_secret);
 
@@ -163,6 +176,30 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let terminal_service = services::terminal_service::TerminalService::new();
     let ai_service = services::ai_service::AiService::from_env();
+
+    let spend_policy_service =
+        services::spend_policy_service::SpendPolicyService::new(spend_policy_repo);
+    let session_key_service = services::session_key_service::SessionKeyService::new(
+        session_key_repo,
+        config.session_key_encryption_key.clone(),
+    );
+    let scheduled_task_service = services::scheduled_task_service::ScheduledTaskService::new(
+        scheduled_task_repo,
+        repositories::session_key_repository::SessionKeyRepository::new(&db),
+    );
+    let webhook_service = services::webhook_service::WebhookService::new(webhook_subscription_repo);
+
+    // Background worker: polls due/triggered scheduled tasks and executes
+    // them unattended via their session key, gated by the same spend-policy
+    // check an interactive transaction goes through. Fire-and-forget spawn,
+    // same pattern as the governor rate-limiter's pruning thread below.
+    services::scheduler_worker::SchedulerWorker::new(
+        scheduled_task_service.clone(),
+        session_key_service.clone(),
+        spend_policy_service.clone(),
+        webhook_service.clone(),
+    )
+    .spawn();
 
     tracing::info!(
         groq_key_count = ai_service.configured_key_count(),
@@ -266,6 +303,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .nest(
             "/api/v1/admin",
             api::routers::admin_router::router(admin_service),
+        )
+        .nest(
+            "/api/v1/spend-policies",
+            api::routers::spend_policy_router::router(spend_policy_service),
+        )
+        .nest(
+            "/api/v1/session-keys",
+            api::routers::session_key_router::router(session_key_service),
+        )
+        .nest(
+            "/api/v1/scheduled-tasks",
+            api::routers::scheduled_task_router::router(scheduled_task_service),
+        )
+        .nest(
+            "/api/v1/webhooks",
+            api::routers::webhook_subscription_router::router(webhook_service),
         )
         .layer(
             ServiceBuilder::new()
