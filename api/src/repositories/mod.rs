@@ -1,4 +1,5 @@
 pub mod admin_repository;
+pub mod api_key_repository;
 pub mod collection_repository;
 pub mod history_repository;
 pub mod otp_repository;

@@ -1,4 +1,6 @@
 pub mod admin_router;
+pub mod public_api_router;
+pub mod api_key_router;
 pub mod ai_router;
 pub mod auth_router;
 pub mod collection_router;

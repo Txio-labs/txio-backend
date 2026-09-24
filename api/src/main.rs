@@ -118,6 +118,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         repositories::webhook_subscription_repository::WebhookSubscriptionRepository::new(&db);
     webhook_subscription_repo.ensure_indices().await?;
 
+    let api_key_repo = repositories::api_key_repository::ApiKeyRepository::new(&db);
+    api_key_repo.ensure_indices().await?;
+
     // 5. Initialize JWT Helper
     let jwt_helper = utils::auth_jwt::JwtHelper::new(config.jwt_secret);
 
@@ -156,6 +159,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         history_repo.clone(),
         workspace_repo.clone(),
     );
+    // Cloned again here before workspace_service takes ownership below —
+    // the public API's history endpoint needs its own handle.
+    let public_history_repo = history_repo.clone();
 
     let workspace_service = services::workspace_service::WorkspaceService::new(
         workspace_repo,
@@ -188,6 +194,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         repositories::session_key_repository::SessionKeyRepository::new(&db),
     );
     let webhook_service = services::webhook_service::WebhookService::new(webhook_subscription_repo);
+
+    let api_key_service = services::api_key_service::ApiKeyService::new(api_key_repo.clone());
+    let public_api_service = services::public_api_service::PublicApiService::new(
+        public_history_repo,
+        session_key_service.clone(),
+        spend_policy_service.clone(),
+    );
 
     // Background worker: polls due/triggered scheduled tasks and executes
     // them unattended via their session key, gated by the same spend-policy
@@ -320,6 +333,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             "/api/v1/webhooks",
             api::routers::webhook_subscription_router::router(webhook_service),
         )
+        .nest(
+            "/api/v1/api-keys",
+            api::routers::api_key_router::router(api_key_service),
+        )
+        // Distinct /api/public/v1 prefix, versioned independently from the
+        // frontend's /api/v1 — this is the stable third-party contract.
+        // Auth here is ApiKeyAuth (an Authorization: Bearer txio_live_...
+        // key), not the JWT Claims extractor every /api/v1 route uses.
+        .nest(
+            "/api/public/v1",
+            api::routers::public_api_router::router(public_api_service),
+        )
         .layer(
             ServiceBuilder::new()
                 .layer(HandleErrorLayer::new(handle_middleware_error))
@@ -330,6 +355,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             config: governor_conf,
         })
         .layer(axum::Extension(jwt_helper))
+        .layer(axum::Extension(api_key_repo))
         .layer(cors)
         .layer(tower_http::trace::TraceLayer::new_for_http());
 

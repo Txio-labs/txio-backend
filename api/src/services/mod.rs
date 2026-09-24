@@ -1,4 +1,6 @@
 pub mod admin_service;
+pub mod api_key_service;
+pub mod public_api_service;
 pub mod ai_service;
 pub mod auth_service;
 pub mod collection_service;

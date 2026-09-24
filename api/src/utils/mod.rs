@@ -1,3 +1,4 @@
+pub mod api_key_auth;
 pub mod auth_jwt;
 pub mod config;
 pub mod error;

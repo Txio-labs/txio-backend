@@ -1,4 +1,6 @@
 pub mod admin_handler;
+pub mod public_api_handler;
+pub mod api_key_handler;
 pub mod ai_handler;
 pub mod auth_handler;
 pub mod collection_handler;
