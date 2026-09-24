@@ -33,12 +33,6 @@ impl SuiService {
     pub fn new(rpc_repo: RpcRepository, _rpc_url: String) -> Self {
         Self {
             rpc_repo,
-            // Disable automatic redirect-following so a redirected RPC response
-            // cannot silently send the request to an internal network address
-            // that passed the initial URL validation but is reachable after a
-            // redirect (SSRF-via-redirect). If a legitimate endpoint ever needs
-            // a redirect, the operator should configure the canonical URL
-            // directly rather than relying on client-side redirect chasing.
             client: Client::builder()
                 .timeout(std::time::Duration::from_secs(30))
                 .redirect(reqwest::redirect::Policy::none())
@@ -85,7 +79,6 @@ impl SuiService {
                 if resp.status().is_success() {
                     match resp.json::<Value>().await {
                         Ok(val) => {
-                            // Check for "error" field in the JSON-RPC response
                             let has_error = val.get("error").is_some();
                             let rpc_error_msg = if has_error {
                                 Some(format!("RPC Error: {}", val["error"]))
@@ -120,6 +113,7 @@ impl SuiService {
                     )
                 }
             }
+
             Err(e) => {
                 let msg = format!("Network Error: {e}");
                 (
@@ -133,8 +127,6 @@ impl SuiService {
                 )
             }
         };
-
-        // Log the request
         let rpc_result: Result<Value, String> = if success {
             Ok(full_resp_val.clone())
         } else {
@@ -153,7 +145,6 @@ impl SuiService {
             eprintln!("Failed to save RPC log: {e}");
         }
 
-        // Return the full JSON object (either from Node or Synthesized)
         Ok(full_resp_val)
     }
 
@@ -173,8 +164,6 @@ impl SuiService {
         url: &str,
         name: &str,
     ) -> Result<String, AppError> {
-        // suix_resolveNameServiceAddress takes [name, null, null] usually, or just [name]
-        // Docs say: suix_resolveNameServiceAddress(name)
         let params = serde_json::json!([name]);
 
         let request_body = JsonRpcRequest {

@@ -201,6 +201,7 @@ impl AiService {
                     }
                 }
             },
+            
             {
                 "type": "function",
                 "function": {

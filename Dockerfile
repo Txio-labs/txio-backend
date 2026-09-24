@@ -3,7 +3,7 @@
 # repository-root Dockerfile instead.
 
 # Build stage
-FROM rust:1.88.0-slim-bookworm AS builder
+FROM rust:1.98.1-slim-bookworm AS builder
 
 # Install build dependencies. git is needed because txio-cli (built below) is
 # a separate repository that depends on this one's `api` crate via a relative
