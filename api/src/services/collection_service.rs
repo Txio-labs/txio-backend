@@ -253,6 +253,9 @@ impl CollectionService {
         name: String,
         method: String,
         params: Value,
+        request_type: String,
+        chain: Option<String>,
+        tx_params: Option<Value>,
         network: Option<String>,
         rpc_url: Option<String>,
     ) -> Result<SavedRequest, AppError> {
@@ -265,6 +268,9 @@ impl CollectionService {
             name,
             method,
             params,
+            request_type,
+            chain,
+            tx_params,
             network,
             rpc_url,
         );
@@ -284,6 +290,7 @@ impl CollectionService {
     }
 
     #[allow(clippy::too_many_arguments)]
+    #[allow(clippy::too_many_arguments)]
     pub async fn update_request(
         &self,
         request_id: ObjectId,
@@ -293,6 +300,9 @@ impl CollectionService {
         params: Option<Value>,
         // `Some(None)` means "clear this field"; `Some(Some(v))` means "set it to v";
         // `None` means the field was omitted from the request and should be left untouched.
+        request_type: Option<Option<String>>,
+        chain: Option<Option<String>>,
+        tx_params: Option<Option<Value>>,
         network: Option<Option<String>>,
         rpc_url: Option<Option<String>>,
         last_response: Option<Option<Value>>, // Allow manual update of response (e.g. paste from UI)
@@ -310,6 +320,15 @@ impl CollectionService {
         }
         if let Some(p) = params {
             req.params = p;
+        }
+        if let Some(Some(rt)) = request_type {
+            req.request_type = rt;
+        }
+        if let Some(chain) = chain {
+            req.chain = chain;
+        }
+        if let Some(tx_params) = tx_params {
+            req.tx_params = tx_params;
         }
 
         if let Some(network) = network {
