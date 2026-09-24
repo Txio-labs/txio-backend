@@ -99,12 +99,14 @@ impl HistoryRepository {
         Ok(entries)
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn find_by_user_and_wallet(
         &self,
         user_id: ObjectId,
         workspace_id: Option<ObjectId>,
         wallet_address: Option<String>,
         wallet_family: Option<String>,
+        chain: Option<String>,
     ) -> Result<Vec<HistoryEntry>, AppError> {
         let mut filter = doc! { "user_id": user_id };
         if let Some(ws) = workspace_id {
@@ -115,6 +117,9 @@ impl HistoryRepository {
         }
         if let Some(family) = wallet_family {
             filter.insert("wallet_family", family);
+        }
+        if let Some(chain) = chain {
+            filter.insert("chain", chain);
         }
 
         let find_options = FindOptions::builder()

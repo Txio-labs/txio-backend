@@ -32,4 +32,5 @@ pub struct HistoryQuery {
     pub workspace_id: Option<String>,
     pub wallet_address: Option<String>,
     pub wallet_family: Option<String>,
+    pub chain: Option<String>,
 }

@@ -84,15 +84,16 @@ impl HistoryService {
         workspace_id: Option<ObjectId>,
         wallet_address: Option<String>,
         wallet_family: Option<String>,
+        chain: Option<String>,
     ) -> Result<Vec<HistoryEntry>, AppError> {
         if let Some(ws) = workspace_id {
             self.ensure_workspace_owner(ws, user_id).await?;
         }
 
-        if wallet_address.is_some() || wallet_family.is_some() {
+        if wallet_address.is_some() || wallet_family.is_some() || chain.is_some() {
             return self
                 .history_repo
-                .find_by_user_and_wallet(user_id, workspace_id, wallet_address, wallet_family)
+                .find_by_user_and_wallet(user_id, workspace_id, wallet_address, wallet_family, chain)
                 .await;
         }
 

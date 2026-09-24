@@ -67,6 +67,7 @@ pub async fn get_history(
             workspace_id,
             query.wallet_address,
             query.wallet_family,
+            query.chain,
         )
         .await?;
 
