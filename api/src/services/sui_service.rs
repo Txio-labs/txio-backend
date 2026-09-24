@@ -76,7 +76,9 @@ impl SuiService {
             params,
         };
 
+        let started_at = std::time::Instant::now();
         let response_result = self.client.post(url).json(&request_body).send().await;
+        let duration_ms = started_at.elapsed().as_millis() as i64;
 
         let (success, full_resp_val, error_msg) = match response_result {
             Ok(resp) => {
@@ -138,7 +140,14 @@ impl SuiService {
         } else {
             Err(error_msg.clone().unwrap_or_else(|| "RPC call failed".to_string()))
         };
-        let log = RpcLog::new(user_id, method.to_string(), params.clone(), rpc_result);
+        let log = RpcLog::new(
+            user_id,
+            method.to_string(),
+            params.clone(),
+            rpc_result,
+            Some(url.to_string()),
+            Some(duration_ms),
+        );
 
         if let Err(e) = self.rpc_repo.save(&log).await {
             eprintln!("Failed to save RPC log: {e}");

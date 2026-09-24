@@ -29,6 +29,17 @@ pub struct HistoryEntry {
     pub method: Option<String>,
     pub params: Option<Value>,
 
+    /// Which linked wallet's chain family executed this request (e.g. "evm",
+    /// "sui"). `None` for entries recorded before multi-wallet linking, or
+    /// for RPC calls made with no wallet connected.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wallet_family: Option<String>,
+
+    /// The address of the wallet that executed this request, so history can
+    /// be filtered per-wallet once a user has multiple linked at once.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wallet_address: Option<String>,
+
     /// Chain-native transaction params (Sui moveParams, EVM evmTxParams,
     /// Solana solanaTxParams, Stellar stellarTxParams) for a TRANSACTION
     /// entry — opaque to the backend, replayed as-is by the frontend.
@@ -60,6 +71,8 @@ impl HistoryEntry {
         network: String,
         method: Option<String>,
         params: Option<Value>,
+        wallet_family: Option<String>,
+        wallet_address: Option<String>,
         tx_params: Option<Value>,
         result: Option<Value>,
         status: i32,
@@ -75,6 +88,8 @@ impl HistoryEntry {
             network,
             method,
             params,
+            wallet_family,
+            wallet_address,
             tx_params,
             result,
             status,

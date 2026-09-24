@@ -14,14 +14,27 @@ pub struct RpcLog {
     pub timestamp: DateTime<Utc>,
     pub success: bool,
     pub error: Option<String>,
+
+    /// The RPC endpoint URL this call was sent to. `None` for logs written
+    /// before endpoint tracking shipped. Powers per-endpoint failure/usage
+    /// aggregation in the admin dashboard.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub endpoint: Option<String>,
+
+    /// Wall-clock time the call took, in milliseconds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub duration_ms: Option<i64>,
 }
 
 impl RpcLog {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         user_id: ObjectId,
         method: String,
         params: Value,
         rpc_result: Result<Value, String>,
+        endpoint: Option<String>,
+        duration_ms: Option<i64>,
     ) -> Self {
         let (success, error) = match rpc_result {
             Ok(_) => (true, None),
@@ -35,6 +48,8 @@ impl RpcLog {
             timestamp: Utc::now(),
             success,
             error,
+            endpoint,
+            duration_ms,
         }
     }
 
@@ -130,6 +145,8 @@ mod tests {
             "eth_sendRawTransaction".to_string(),
             params,
             Ok(Value::Null),
+            None,
+            None,
         );
         let params = log.params;
 
@@ -156,6 +173,8 @@ mod tests {
             "eth_blockNumber".to_string(),
             params,
             Ok(Value::Null),
+            None,
+            None,
         );
         assert_eq!(
             log.params,
@@ -176,6 +195,8 @@ mod tests {
             "sui_executeTransactionBlock".to_string(),
             params,
             Ok(Value::Null),
+            None,
+            None,
         );
 
         assert_eq!(log.params[0], Value::String("[REDACTED]".to_string()));

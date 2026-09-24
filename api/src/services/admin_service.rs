@@ -1,6 +1,6 @@
 use crate::dtos::admin_dtos::{
-    AdminCollectionEntry, AdminLogEntry, AdminOverviewResponse, AdminRequestEntry,
-    AdminStatsResponse, AdminUserEntry,
+    AdminCollectionEntry, AdminEndpointStatsEntry, AdminLogEntry, AdminOverviewResponse,
+    AdminRequestEntry, AdminStatsResponse, AdminUserEntry,
 };
 use crate::model::user::User;
 use crate::repositories::admin_repository::AdminRepository;
@@ -134,6 +134,30 @@ impl AdminService {
                 success: log.success,
                 error: log.error,
                 timestamp: log.timestamp.to_rfc3339(),
+                endpoint: log.endpoint,
+                duration_ms: log.duration_ms,
+            })
+            .collect())
+    }
+
+    /// Per-endpoint rollup (usage volume, failures, latency) over the most
+    /// recent logged calls — backs the admin "Endpoints" view.
+    pub async fn endpoint_stats(
+        &self,
+        claims: &Claims,
+        sample_size: i64,
+    ) -> Result<Vec<AdminEndpointStatsEntry>, AppError> {
+        self.require_admin(claims).await?;
+
+        let stats = self.rpc_repo.endpoint_stats(sample_size).await?;
+        Ok(stats
+            .into_iter()
+            .map(|s| AdminEndpointStatsEntry {
+                endpoint: s.endpoint,
+                total_calls: s.total_calls,
+                failed_calls: s.failed_calls,
+                avg_duration_ms: s.avg_duration_ms,
+                recent_errors: s.recent_errors,
             })
             .collect())
     }

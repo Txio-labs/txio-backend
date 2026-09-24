@@ -27,6 +27,12 @@ impl HistoryRepository {
             .keys(doc! { "user_id": 1, "executed_at": -1 })
             .build();
         self.collection.create_index(index, None).await?;
+
+        let wallet_index = IndexModel::builder()
+            .keys(doc! { "user_id": 1, "wallet_address": 1, "executed_at": -1 })
+            .build();
+        self.collection.create_index(wallet_index, None).await?;
+
         Ok(())
     }
 
@@ -76,6 +82,39 @@ impl HistoryRepository {
         let mut filter = doc! { "user_id": user_id };
         if let Some(ws) = workspace_id {
             filter.insert("workspace_id", ws);
+        }
+
+        let find_options = FindOptions::builder()
+            .sort(doc! { "executed_at": -1 })
+            .limit(MAX_ENTRIES_PER_USER)
+            .build();
+
+        let mut cursor = self.collection.find(filter, find_options).await?;
+        let mut entries = Vec::new();
+        while cursor.advance().await? {
+            let entry: HistoryEntry = cursor.deserialize_current().map_err(AppError::Database)?;
+            entries.push(entry);
+        }
+
+        Ok(entries)
+    }
+
+    pub async fn find_by_user_and_wallet(
+        &self,
+        user_id: ObjectId,
+        workspace_id: Option<ObjectId>,
+        wallet_address: Option<String>,
+        wallet_family: Option<String>,
+    ) -> Result<Vec<HistoryEntry>, AppError> {
+        let mut filter = doc! { "user_id": user_id };
+        if let Some(ws) = workspace_id {
+            filter.insert("workspace_id", ws);
+        }
+        if let Some(address) = wallet_address {
+            filter.insert("wallet_address", address);
+        }
+        if let Some(family) = wallet_family {
+            filter.insert("wallet_family", family);
         }
 
         let find_options = FindOptions::builder()

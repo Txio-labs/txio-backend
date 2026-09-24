@@ -26,6 +26,21 @@ pub struct AdminLogEntry {
     pub timestamp: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub user_email: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub endpoint: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub duration_ms: Option<i64>,
+}
+
+/// Per-endpoint usage/health rollup — most-used endpoints, failure counts,
+/// average latency, and a short sample of recent failure messages.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct AdminEndpointStatsEntry {
+    pub endpoint: String,
+    pub total_calls: i64,
+    pub failed_calls: i64,
+    pub avg_duration_ms: Option<f64>,
+    pub recent_errors: Vec<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

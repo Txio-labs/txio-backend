@@ -1,6 +1,7 @@
 use crate::dtos::admin_dtos::{
-    AdminCollectionEntry, AdminDeleteUserRequest, AdminLogEntry, AdminOverviewResponse,
-    AdminRequestEntry, AdminStatsResponse, AdminUserEntry, AdminUsersResponse,
+    AdminCollectionEntry, AdminDeleteUserRequest, AdminEndpointStatsEntry, AdminLogEntry,
+    AdminOverviewResponse, AdminRequestEntry, AdminStatsResponse, AdminUserEntry,
+    AdminUsersResponse,
 };
 use crate::services::admin_service::AdminService;
 use crate::utils::auth_jwt::Claims;
@@ -70,6 +71,22 @@ pub async fn list_logs(
         .clamp(1, MAX_LOG_LIMIT);
     let logs = service.list_logs(&claims, limit).await?;
     Ok(Json(logs))
+}
+
+const DEFAULT_ENDPOINT_STATS_SAMPLE: i64 = 1000;
+const MAX_ENDPOINT_STATS_SAMPLE: i64 = 5000;
+
+pub async fn endpoint_stats(
+    State(service): State<AdminService>,
+    claims: Claims,
+    axum::extract::Query(query): axum::extract::Query<LogsQuery>,
+) -> Result<Json<Vec<AdminEndpointStatsEntry>>, AppError> {
+    let sample_size = query
+        .limit
+        .unwrap_or(DEFAULT_ENDPOINT_STATS_SAMPLE)
+        .clamp(1, MAX_ENDPOINT_STATS_SAMPLE);
+    let stats = service.endpoint_stats(&claims, sample_size).await?;
+    Ok(Json(stats))
 }
 
 pub async fn overview(

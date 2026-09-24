@@ -11,6 +11,7 @@ pub fn router(service: AdminService) -> Router {
         .route("/users/delete", post(admin_handler::delete_user))
         .route("/stats", get(admin_handler::stats))
         .route("/logs", get(admin_handler::list_logs))
+        .route("/endpoint-stats", get(admin_handler::endpoint_stats))
         .route("/overview", get(admin_handler::overview))
         .route("/accounts", get(admin_handler::list_accounts))
         .route("/requests", get(admin_handler::list_requests))

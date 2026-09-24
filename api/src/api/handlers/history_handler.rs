@@ -40,6 +40,8 @@ pub async fn create_history_entry(
             payload.network,
             payload.method,
             payload.params,
+            payload.wallet_family,
+            payload.wallet_address,
             payload.tx_params,
             payload.result,
             payload.status,
@@ -59,7 +61,14 @@ pub async fn get_history(
         .map_err(|_| AppError::Unauthorized("Invalid user ID in token".into()))?;
     let workspace_id = parse_workspace_id(query.workspace_id.as_deref())?;
 
-    let entries = service.list(user_id, workspace_id).await?;
+    let entries = service
+        .list(
+            user_id,
+            workspace_id,
+            query.wallet_address,
+            query.wallet_family,
+        )
+        .await?;
 
     Ok(Json(serde_json::to_value(entries).unwrap()))
 }

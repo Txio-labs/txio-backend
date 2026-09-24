@@ -47,6 +47,8 @@ impl HistoryService {
         network: String,
         method: Option<String>,
         params: Option<Value>,
+        wallet_family: Option<String>,
+        wallet_address: Option<String>,
         tx_params: Option<Value>,
         result_data: Option<Value>,
         status: i32,
@@ -65,6 +67,8 @@ impl HistoryService {
             network,
             method,
             params,
+            wallet_family,
+            wallet_address,
             tx_params,
             result_data,
             status,
@@ -78,9 +82,18 @@ impl HistoryService {
         &self,
         user_id: ObjectId,
         workspace_id: Option<ObjectId>,
+        wallet_address: Option<String>,
+        wallet_family: Option<String>,
     ) -> Result<Vec<HistoryEntry>, AppError> {
         if let Some(ws) = workspace_id {
             self.ensure_workspace_owner(ws, user_id).await?;
+        }
+
+        if wallet_address.is_some() || wallet_family.is_some() {
+            return self
+                .history_repo
+                .find_by_user_and_wallet(user_id, workspace_id, wallet_address, wallet_family)
+                .await;
         }
 
         self.history_repo.find_by_user(user_id, workspace_id).await

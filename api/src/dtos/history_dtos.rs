@@ -19,6 +19,8 @@ pub struct CreateHistoryEntryRequest {
 
     pub method: Option<String>,
     pub params: Option<Value>,
+    pub wallet_family: Option<String>,
+    pub wallet_address: Option<String>,
     pub tx_params: Option<Value>,
     pub result: Option<Value>,
     pub status: i32,
@@ -28,4 +30,6 @@ pub struct CreateHistoryEntryRequest {
 #[derive(Debug, Deserialize)]
 pub struct HistoryQuery {
     pub workspace_id: Option<String>,
+    pub wallet_address: Option<String>,
+    pub wallet_family: Option<String>,
 }
