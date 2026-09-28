@@ -1,4 +1,7 @@
 pub mod api_key;
+pub mod bridge_chain;
+pub mod bridge_offramp;
+pub mod bridge_order;
 pub mod collection;
 pub mod history;
 pub mod network;

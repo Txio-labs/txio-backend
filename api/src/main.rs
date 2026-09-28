@@ -121,6 +121,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let api_key_repo = repositories::api_key_repository::ApiKeyRepository::new(&db);
     api_key_repo.ensure_indices().await?;
 
+    let bridge_order_repo = repositories::bridge_order_repository::BridgeOrderRepository::new(&db);
+    bridge_order_repo.ensure_indices().await?;
+
+    // Reserved for persisting off-ramp order status once execution (not just
+    // quoting) is wired up; index creation runs now so the collection is
+    // ready ahead of that.
+    let bridge_offramp_repo =
+        repositories::bridge_offramp_repository::BridgeOfframpRepository::new(&db);
+    bridge_offramp_repo.ensure_indices().await?;
+    drop(bridge_offramp_repo);
+
     // 5. Initialize JWT Helper
     let jwt_helper = utils::auth_jwt::JwtHelper::new(config.jwt_secret);
 
@@ -196,6 +207,32 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let webhook_service = services::webhook_service::WebhookService::new(webhook_subscription_repo);
 
     let api_key_service = services::api_key_service::ApiKeyService::new(api_key_repo.clone());
+
+    let lifi_client = services::lifi_client::LifiClient::new(
+        config.lifi_base_url.clone(),
+        config.lifi_api_key.clone(),
+    );
+    let sideshift_client = services::sideshift_client::SideshiftClient::new(
+        config.sideshift_base_url.clone(),
+        config.sideshift_secret.clone(),
+        config.sideshift_affiliate_id.clone(),
+    );
+    let bridge_service = services::bridge_service::BridgeService::new(
+        lifi_client,
+        sideshift_client,
+        bridge_order_repo,
+    );
+
+    let bridge_xyz_client = services::bridge_xyz_client::BridgeXyzClient::new(
+        config.bridge_xyz_base_url.clone(),
+        config.bridge_xyz_api_key.clone(),
+    );
+    let transak_client = services::transak_client::TransakClient::new(
+        config.transak_base_url.clone(),
+        config.transak_api_key.clone(),
+    );
+    let offramp_service =
+        services::offramp_service::OfframpService::new(bridge_xyz_client, transak_client);
     let public_api_service = services::public_api_service::PublicApiService::new(
         public_history_repo,
         session_key_service.clone(),
@@ -336,6 +373,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .nest(
             "/api/v1/api-keys",
             api::routers::api_key_router::router(api_key_service),
+        )
+        .nest(
+            "/api/v1/bridge",
+            api::routers::bridge_router::router(bridge_service, offramp_service),
         )
         // Distinct /api/public/v1 prefix, versioned independently from the
         // frontend's /api/v1 — this is the stable third-party contract.

@@ -81,7 +81,7 @@ pub fn router(service: AuthService) -> Router {
         .route("/logout", post(auth_handler::logout))
         .route("/sessions", get(auth_handler::list_sessions))
         .route(
-            "/sessions/{session_id}",
+            "/sessions/:session_id",
             delete(auth_handler::revoke_session),
         )
         .route(

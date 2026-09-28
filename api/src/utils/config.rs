@@ -17,6 +17,17 @@ pub struct Config {
     /// other, since they protect very different things (login tokens vs.
     /// funds-capable automation keys).
     pub session_key_encryption_key: String,
+
+    // --- Bridge (swap/bridge/off-ramp aggregator) ---
+    pub lifi_api_key: Option<String>,
+    pub lifi_base_url: String,
+    pub sideshift_secret: Option<String>,
+    pub sideshift_affiliate_id: Option<String>,
+    pub sideshift_base_url: String,
+    pub bridge_xyz_api_key: Option<String>,
+    pub bridge_xyz_base_url: String,
+    pub transak_api_key: Option<String>,
+    pub transak_base_url: String,
 }
 
 /// Client credentials + redirect target for a single OAuth provider.
@@ -80,6 +91,39 @@ impl Config {
         let google_oauth = oauth_client_from_env(&config, "GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET");
         let github_oauth = oauth_client_from_env(&config, "GITHUB_CLIENT_ID", "GITHUB_CLIENT_SECRET");
 
+        let lifi_api_key = config.get_string("LIFI_API_KEY").ok().filter(|s| !s.trim().is_empty());
+        let lifi_base_url = config
+            .get_string("LIFI_BASE_URL")
+            .unwrap_or_else(|_| "https://li.quest/v1".to_string());
+
+        let sideshift_secret = config
+            .get_string("SIDESHIFT_SECRET")
+            .ok()
+            .filter(|s| !s.trim().is_empty());
+        let sideshift_affiliate_id = config
+            .get_string("SIDESHIFT_AFFILIATE_ID")
+            .ok()
+            .filter(|s| !s.trim().is_empty());
+        let sideshift_base_url = config
+            .get_string("SIDESHIFT_BASE_URL")
+            .unwrap_or_else(|_| "https://sideshift.ai/api/v2".to_string());
+
+        let bridge_xyz_api_key = config
+            .get_string("BRIDGE_XYZ_API_KEY")
+            .ok()
+            .filter(|s| !s.trim().is_empty());
+        let bridge_xyz_base_url = config
+            .get_string("BRIDGE_XYZ_BASE_URL")
+            .unwrap_or_else(|_| "https://api.bridge.xyz".to_string());
+
+        let transak_api_key = config
+            .get_string("TRANSAK_API_KEY")
+            .ok()
+            .filter(|s| !s.trim().is_empty());
+        let transak_base_url = config
+            .get_string("TRANSAK_BASE_URL")
+            .unwrap_or_else(|_| "https://api.transak.com".to_string());
+
         Ok(Config {
             mongo_uri,
             jwt_secret,
@@ -90,6 +134,15 @@ impl Config {
             backend_url,
             frontend_url,
             session_key_encryption_key,
+            lifi_api_key,
+            lifi_base_url,
+            sideshift_secret,
+            sideshift_affiliate_id,
+            sideshift_base_url,
+            bridge_xyz_api_key,
+            bridge_xyz_base_url,
+            transak_api_key,
+            transak_base_url,
         })
     }
 }

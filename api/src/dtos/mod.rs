@@ -1,5 +1,6 @@
 pub mod admin_dtos;
 pub mod api_key_dtos;
+pub mod bridge_dtos;
 pub mod public_api_dtos;
 pub mod ai;
 pub mod collection_dtos;

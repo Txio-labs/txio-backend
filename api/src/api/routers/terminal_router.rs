@@ -9,11 +9,11 @@ pub fn router(service: TerminalService) -> Router {
     Router::new()
         .route("/execute", post(terminal_handler::execute))
         .route(
-            "/executions/{execution_id}",
+            "/executions/:execution_id",
             get(terminal_handler::get_execution),
         )
         .route(
-            "/executions/{execution_id}/cancel",
+            "/executions/:execution_id/cancel",
             post(terminal_handler::cancel_execution),
         )
         .with_state(service)

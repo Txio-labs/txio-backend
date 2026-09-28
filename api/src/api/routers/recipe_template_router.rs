@@ -9,6 +9,6 @@ pub fn router(service: RecipeTemplateService) -> Router {
     Router::new()
         .route("/", post(recipe_template_handler::create_template))
         .route("/", get(recipe_template_handler::get_user_templates))
-        .route("/{id}", delete(recipe_template_handler::delete_template))
+        .route("/:id", delete(recipe_template_handler::delete_template))
         .with_state(service)
 }

@@ -3,6 +3,7 @@ pub mod public_api_handler;
 pub mod api_key_handler;
 pub mod ai_handler;
 pub mod auth_handler;
+pub mod bridge_handler;
 pub mod collection_handler;
 pub mod history_handler;
 pub mod recipe_template_handler;
