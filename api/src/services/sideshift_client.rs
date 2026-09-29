@@ -84,6 +84,20 @@ impl SideshiftClient {
                     "SideShift is not available from this server's hosting region right now. Try again later or use a different provider.".into(),
                 ));
             }
+            // QUOTE_UNAVAILABLE means the amount is outside SideShift's
+            // current deposit range for this pair — a client-fixable input
+            // problem (400), not an upstream failure (502). The range
+            // itself moves with exchange rates, so it can't be validated
+            // client-side ahead of time; forward SideShift's own message,
+            // which already states the actual min/max.
+            if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&body) {
+                if parsed["error"]["code"] == "QUOTE_UNAVAILABLE" {
+                    let message = parsed["error"]["message"]
+                        .as_str()
+                        .unwrap_or("Amount is outside the allowed range for this pair.");
+                    return Err(AppError::BadRequest(message.to_string()));
+                }
+            }
             return Err(AppError::ExternalService(format!(
                 "SideShift quote failed: {body}"
             )));
