@@ -73,30 +73,8 @@ impl SideshiftClient {
         }
         if !response.status().is_success() {
             let body = response.text().await.unwrap_or_default();
-            // SideShift geo-blocks some jurisdictions (including the US) at
-            // the account/IP level, independent of the request payload —
-            // this is safe to tell the caller directly (unlike other
-            // ExternalService failures, which stay server-side-only) since
-            // it explains a real, permanent condition rather than leaking
-            // upstream internals.
-            if body.contains("ACCESS_DENIED") {
-                return Err(AppError::BadRequest(
-                    "SideShift is not available from this server's hosting region right now. Try again later or use a different provider.".into(),
-                ));
-            }
-            // QUOTE_UNAVAILABLE means the amount is outside SideShift's
-            // current deposit range for this pair — a client-fixable input
-            // problem (400), not an upstream failure (502). The range
-            // itself moves with exchange rates, so it can't be validated
-            // client-side ahead of time; forward SideShift's own message,
-            // which already states the actual min/max.
-            if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&body) {
-                if parsed["error"]["code"] == "QUOTE_UNAVAILABLE" {
-                    let message = parsed["error"]["message"]
-                        .as_str()
-                        .unwrap_or("Amount is outside the allowed range for this pair.");
-                    return Err(AppError::BadRequest(message.to_string()));
-                }
+            if let Some(client_error) = classify_sideshift_error(&body) {
+                return Err(client_error);
             }
             return Err(AppError::ExternalService(format!(
                 "SideShift quote failed: {body}"
@@ -181,6 +159,9 @@ impl SideshiftClient {
 
         if !response.status().is_success() {
             let body = response.text().await.unwrap_or_default();
+            if let Some(client_error) = classify_sideshift_error(&body) {
+                return Err(client_error);
+            }
             return Err(AppError::ExternalService(format!(
                 "SideShift order creation failed: {body}"
             )));
@@ -209,4 +190,37 @@ impl SideshiftClient {
             .await
             .map_err(|e| AppError::ExternalService(format!("SideShift response parse failed: {e}")))
     }
+}
+
+/// Maps a SideShift error response to a client-facing `BadRequest` when it
+/// represents a fixable input problem rather than an upstream failure —
+/// returns `None` for anything else, so the caller falls back to a generic
+/// `ExternalService` (502).
+fn classify_sideshift_error(body: &str) -> Option<AppError> {
+    // Geo-blocks some jurisdictions (including the US) at the account/IP
+    // level, independent of the request payload — this is safe to state
+    // directly (unlike other ExternalService failures, which stay
+    // server-side-only) since it explains a real, permanent condition
+    // rather than leaking upstream internals.
+    if body.contains("ACCESS_DENIED") {
+        return Some(AppError::BadRequest(
+            "SideShift is not available from this server's hosting region right now. Try again later or use a different provider.".into(),
+        ));
+    }
+
+    let parsed: serde_json::Value = serde_json::from_str(body).ok()?;
+    let code = parsed["error"]["code"].as_str()?;
+    let message = parsed["error"]["message"].as_str().unwrap_or(
+        "The request was rejected by SideShift — check the amount, coin, and address.",
+    );
+
+    // QUOTE_UNAVAILABLE: amount outside the current deposit range (moves
+    // with exchange rates, so it can't be validated client-side ahead of
+    // time). BAD_USER_INPUT: malformed field, most commonly an invalid
+    // settle address for the destination chain. Both are the caller's to
+    // fix, not a service outage — forward SideShift's own message, which
+    // already states the specific problem (e.g. the actual min/max, or
+    // which field was invalid).
+    matches!(code, "QUOTE_UNAVAILABLE" | "BAD_USER_INPUT")
+        .then(|| AppError::BadRequest(message.to_string()))
 }
