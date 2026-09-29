@@ -73,6 +73,17 @@ impl SideshiftClient {
         }
         if !response.status().is_success() {
             let body = response.text().await.unwrap_or_default();
+            // SideShift geo-blocks some jurisdictions (including the US) at
+            // the account/IP level, independent of the request payload —
+            // this is safe to tell the caller directly (unlike other
+            // ExternalService failures, which stay server-side-only) since
+            // it explains a real, permanent condition rather than leaking
+            // upstream internals.
+            if body.contains("ACCESS_DENIED") {
+                return Err(AppError::BadRequest(
+                    "SideShift is not available from this server's hosting region right now. Try again later or use a different provider.".into(),
+                ));
+            }
             return Err(AppError::ExternalService(format!(
                 "SideShift quote failed: {body}"
             )));
