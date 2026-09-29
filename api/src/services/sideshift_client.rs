@@ -40,6 +40,15 @@ impl SideshiftClient {
             "settleNetwork": req.to_chain,
             "depositAmount": req.amount,
         });
+
+        tracing::debug!(
+            deposit_coin = %req.from_token,
+            deposit_network = %req.from_chain,
+            settle_coin = %req.to_token,
+            settle_network = %req.to_chain,
+            deposit_amount = %req.amount,
+            "SideShift quote request"
+        );
         // SideShift rejects `affiliateId: null` outright (BAD_USER_INPUT) —
         // the field must be omitted entirely when unset, not sent as null.
         if let Some(affiliate_id) = &self.affiliate_id {
