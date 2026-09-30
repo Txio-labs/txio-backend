@@ -34,7 +34,7 @@ The Axum API lives in `api/`, not the repo root:
 
 ```bash
 cd api
-cp .env.example .env   # fill in MONGO_URI, JWT_SECRET, BREVO_API_KEY, GROQ_API_KEYS, GROQ_MODEL
+cp .env.example .env   # fill in MONGO_URI, JWT_SECRET, BREVO_API_KEY
 cargo run
 ```
 

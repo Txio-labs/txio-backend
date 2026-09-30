@@ -11,8 +11,10 @@ use axum::{routing::{get, post}, Router};
 // directly, same as any other external client.
 pub fn router(service: PublicApiService) -> Router {
     Router::new()
+        .route("/openapi.json", get(public_api_handler::openapi_document))
         .route("/history", get(public_api_handler::get_history))
         .route("/transactions/simulate", post(public_api_handler::simulate_transaction))
         .route("/transactions/execute", post(public_api_handler::execute_transaction))
+        .layer(axum::middleware::from_fn(crate::api::middleware::public_api::public_api_layer))
         .with_state(service)
 }

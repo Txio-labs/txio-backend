@@ -25,9 +25,10 @@ pub struct ApiKey {
     #[validate(length(min = 1, message = "Label cannot be empty"))]
     pub label: String,
 
-    /// Never serialized in any API response — see ApiKeyAuth, the only
-    /// consumer, which reads this field directly on the in-memory struct.
-    #[serde(skip_serializing)]
+    /// The SHA-256 of the raw key. It MUST be serialized, because that is
+    /// how it reaches MongoDB (`skip_serializing` here once dropped it from
+    /// the stored document, so no key could ever authenticate). API
+    /// responses use `ApiKeyResponse` instead and never include it.
     pub key_hash: String,
 
     /// A short, non-secret prefix of the raw key (e.g. `txio_live_ab12`),
@@ -77,5 +78,17 @@ impl ApiKey {
 
     pub fn has_scope(&self, scope: &str) -> bool {
         self.scopes.iter().any(|s| s == scope)
+    }
+}
+
+#[cfg(test)]
+mod persistence_tests {
+    use super::*;
+
+    #[test]
+    fn key_hash_survives_bson_serialization_or_auth_cannot_work() {
+        let key = ApiKey::new(ObjectId::new(), "l".into(), "abc123".into(), "txio_live_ab".into(), vec![]);
+        let doc = mongodb::bson::to_document(&key).unwrap();
+        assert_eq!(doc.get_str("key_hash").ok(), Some("abc123"), "stored document: {doc:?}");
     }
 }

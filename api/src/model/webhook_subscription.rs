@@ -34,6 +34,13 @@ pub struct WebhookSubscription {
     /// key's raw value).
     pub secret_hash: String,
 
+    /// The signing secret, AES-256-GCM encrypted at rest. Deliveries are
+    /// signed with the raw secret (the one the receiver was shown), so it has
+    /// to be recoverable; a bcrypt hash cannot be. Absent on subscriptions
+    /// created before this field existed; rotate their secret to fix signing.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub secret_enc: Option<String>,
+
     pub is_active: bool,
 
     #[serde(
@@ -51,13 +58,14 @@ pub struct WebhookSubscription {
 }
 
 impl WebhookSubscription {
-    pub fn new(user_id: ObjectId, url: String, events: Vec<String>, secret_hash: String) -> Self {
+    pub fn new(user_id: ObjectId, url: String, events: Vec<String>, secret_hash: String, secret_enc: Option<String>) -> Self {
         Self {
             id: None,
             user_id,
             url,
             events,
             secret_hash,
+            secret_enc,
             is_active: true,
             last_delivered_at: None,
             last_delivery_error: None,

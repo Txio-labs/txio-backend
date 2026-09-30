@@ -1,15 +1,14 @@
+use crate::model::workspace_member::WorkspaceRole;
 use crate::model::{collection::Collection, network::Network, request::SavedRequest};
 use crate::repositories::{
     collection_repository::CollectionRepository, request_repository::RequestRepository,
-    user_repository::UserRepository, workspace_repository::WorkspaceRepository,
+    user_repository::UserRepository,
 };
+use crate::services::workspace_access::WorkspaceAccess;
 use crate::services::sui_service::SuiService;
 use crate::utils::error::AppError;
 use mongodb::bson::oid::ObjectId;
 use serde_json::Value;
-use std::net::IpAddr;
-use tokio::net::lookup_host;
-use url::{Host, Url};
 
 /// Returns `true` when the character at byte position `end` in `s` is a
 /// name-continuation character (`[A-Za-z0-9.-]`), meaning the regex match
@@ -28,7 +27,7 @@ pub struct CollectionService {
     collection_repo: CollectionRepository,
     request_repo: RequestRepository,
     user_repo: UserRepository,
-    workspace_repo: WorkspaceRepository,
+    access: WorkspaceAccess,
     sui_service: SuiService,
 }
 
@@ -37,33 +36,48 @@ impl CollectionService {
         collection_repo: CollectionRepository,
         request_repo: RequestRepository,
         user_repo: UserRepository,
-        workspace_repo: WorkspaceRepository,
+        access: WorkspaceAccess,
         sui_service: SuiService,
     ) -> Self {
         Self {
             collection_repo,
             request_repo,
             user_repo,
-            workspace_repo,
+            access,
             sui_service,
         }
     }
 
-    async fn ensure_workspace_owner(
+    /// Checks the caller holds at least `min` in the workspace.
+    async fn require_workspace_role(
         &self,
         workspace_id: ObjectId,
         user_id: ObjectId,
-    ) -> Result<(), AppError> {
-        let workspace = self.workspace_repo.find_by_id(workspace_id).await?;
-
-        if workspace.user_id != user_id {
-            return Err(AppError::Forbidden(
-                "Not authorized to access this workspace".into(),
-            ));
-        }
-
-        Ok(())
+        min: WorkspaceRole,
+    ) -> Result<WorkspaceRole, AppError> {
+        Ok(self.access.require(workspace_id, user_id, min).await?.1)
     }
+
+    /// Loads a collection and checks the caller may act on it at level `min`.
+    /// A collection in a workspace follows the workspace's roles; a legacy
+    /// collection with no workspace stays private to its creator.
+    async fn authorize_collection(
+        &self,
+        collection_id: ObjectId,
+        user_id: ObjectId,
+        min: WorkspaceRole,
+    ) -> Result<(Collection, WorkspaceRole), AppError> {
+        let collection = self.collection_repo.find_by_id(collection_id).await?;
+        match collection.workspace_id {
+            Some(workspace_id) => {
+                let role = self.require_workspace_role(workspace_id, user_id, min).await?;
+                Ok((collection, role))
+            }
+            None if collection.user_id == user_id => Ok((collection, WorkspaceRole::Owner)),
+            None => Err(AppError::Forbidden("Not authorized to access this collection".into())),
+        }
+    }
+
     /// Parses a stored `SavedRequest.network` string (e.g. `"localnet"`) into
     /// a [`Network`], surfacing an unknown value as a client error rather
     /// than panicking or silently defaulting.
@@ -86,87 +100,14 @@ impl CollectionService {
             .any(|network| network.sui_url() == url_str)
     }
 
+    /// The hardcoded network defaults are trusted; anything else a user
+    /// supplied goes through the shared SSRF guard (`utils::url_safety`), the
+    /// same one webhooks use.
     async fn validate_url(url_str: &str) -> Result<(), AppError> {
         if Self::is_canonical_network_default(url_str) {
             return Ok(());
         }
-
-        // Parse URL
-        let url = Url::parse(url_str)
-            .map_err(|e| AppError::BadRequest(format!("Invalid RPC URL: {e}")))?;
-        // Only allow HTTPS scheme
-        if url.scheme() != "https" {
-            return Err(AppError::BadRequest(
-                "Only HTTPS RPC URLs are allowed".into(),
-            ));
-        }
-
-        match url.host() {
-            Some(Host::Domain(host)) if host.eq_ignore_ascii_case("localhost") => {
-                return Err(AppError::BadRequest(
-                    "Localhost URLs are not allowed".into(),
-                ));
-            }
-            Some(Host::Ipv4(v4)) => {
-                if v4.is_loopback() || v4.is_private() || v4.is_link_local() {
-                    return Err(AppError::BadRequest(
-                        "Private or link-local IP addresses are not allowed".into(),
-                    ));
-                }
-            }
-            Some(Host::Ipv6(v6)) => {
-                if v6.is_loopback() || v6.is_unique_local() || v6.is_unicast_link_local() {
-                    return Err(AppError::BadRequest(
-                        "Private or link-local IP addresses are not allowed".into(),
-                    ));
-                }
-            }
-            Some(Host::Domain(host)) => {
-                // Resolve the domain name and reject if any resolved address is
-                // in a private, loopback, or link-local range. This closes the
-                // SSRF-via-DNS gap where an attacker registers a domain whose A
-                // record points at an internal address (e.g. 169.254.169.254).
-                //
-                // Note: there is an inherent TOCTOU window between validation
-                // and the actual HTTP connect (DNS rebinding). Operators who
-                // need to close that window fully should deploy an egress proxy
-                // that enforces IP allowlists at the network layer.
-                let port = url.port().unwrap_or(443);
-                let lookup_addr = format!("{host}:{port}");
-                let addrs: Vec<_> = lookup_host(&lookup_addr)
-                    .await
-                    .map_err(|_| {
-                        AppError::BadRequest(format!(
-                            "RPC URL hostname could not be resolved: {host}"
-                        ))
-                    })?
-                    .collect();
-
-                if addrs.is_empty() {
-                    return Err(AppError::BadRequest(format!(
-                        "RPC URL hostname resolved to no addresses: {host}"
-                    )));
-                }
-
-                for addr in addrs {
-                    let ip: IpAddr = addr.ip();
-                    let blocked = match ip {
-                        IpAddr::V4(v4) => v4.is_loopback() || v4.is_private() || v4.is_link_local(),
-                        IpAddr::V6(v6) => {
-                            v6.is_loopback() || v6.is_unique_local() || v6.is_unicast_link_local()
-                        }
-                    };
-                    if blocked {
-                        return Err(AppError::BadRequest(
-                            "RPC URL resolves to a private or link-local address".into(),
-                        ));
-                    }
-                }
-            }
-            None => {}
-        }
-
-        Ok(())
+        crate::utils::url_safety::validate_https_url(url_str).await
     }
 
     // --- Collections ---
@@ -178,7 +119,7 @@ impl CollectionService {
         name: String,
         description: Option<String>,
     ) -> Result<Collection, AppError> {
-        self.ensure_workspace_owner(workspace_id, user_id).await?;
+        self.require_workspace_role(workspace_id, user_id, WorkspaceRole::Editor).await?;
 
         let new_collection = Collection::new(user_id, Some(workspace_id), name, description);
         self.collection_repo.save(&new_collection).await
@@ -190,12 +131,10 @@ impl CollectionService {
         workspace_id: Option<ObjectId>,
     ) -> Result<Vec<Collection>, AppError> {
         if let Some(workspace_id) = workspace_id {
-            self.ensure_workspace_owner(workspace_id, user_id).await?;
+            // Every member sees the workspace's collections, whoever created them.
+            self.require_workspace_role(workspace_id, user_id, WorkspaceRole::Viewer).await?;
 
-            return self
-                .collection_repo
-                .find_all_by_user_and_workspace(user_id, workspace_id)
-                .await;
+            return self.collection_repo.find_all_by_workspace(workspace_id).await;
         }
 
         self.collection_repo.find_all_by_user(user_id).await
@@ -206,13 +145,7 @@ impl CollectionService {
         collection_id: ObjectId,
         user_id: ObjectId,
     ) -> Result<Collection, AppError> {
-        let collection = self.collection_repo.find_by_id(collection_id).await?;
-        if collection.user_id != user_id {
-            return Err(AppError::Forbidden(
-                "Not authorized to access this collection".into(),
-            ));
-        }
-        Ok(collection)
+        Ok(self.authorize_collection(collection_id, user_id, WorkspaceRole::Viewer).await?.0)
     }
 
     pub async fn update_collection(
@@ -222,7 +155,7 @@ impl CollectionService {
         name: String,
         description: Option<String>,
     ) -> Result<Collection, AppError> {
-        let mut collection = self.get_collection(collection_id, user_id).await?;
+        let (mut collection, _) = self.authorize_collection(collection_id, user_id, WorkspaceRole::Editor).await?;
         collection.name = name;
         collection.description = description;
         collection.updated_at = chrono::Utc::now();
@@ -234,7 +167,11 @@ impl CollectionService {
         collection_id: ObjectId,
         user_id: ObjectId,
     ) -> Result<(), AppError> {
-        let _collection = self.get_collection(collection_id, user_id).await?;
+        // Editors may delete collections they created; only the owner can delete others'.
+        let (collection, role) = self.authorize_collection(collection_id, user_id, WorkspaceRole::Editor).await?;
+        if role != WorkspaceRole::Owner && collection.user_id != user_id {
+            return Err(AppError::Forbidden("Only the collection's creator or the workspace owner can delete it".into()));
+        }
         // Cascade delete requests
         self.request_repo
             .delete_all_by_collection(collection_id)
@@ -259,8 +196,8 @@ impl CollectionService {
         network: Option<String>,
         rpc_url: Option<String>,
     ) -> Result<SavedRequest, AppError> {
-        // Verify ownership/existence of collection
-        let _ = self.get_collection(collection_id, user_id).await?;
+        // Creating requests needs edit rights on the collection.
+        let _ = self.authorize_collection(collection_id, user_id, WorkspaceRole::Editor).await?;
 
         let new_req = SavedRequest::new(
             collection_id,
@@ -282,8 +219,7 @@ impl CollectionService {
         collection_id: ObjectId,
         user_id: ObjectId,
     ) -> Result<Vec<SavedRequest>, AppError> {
-        // Verify ownership
-        let _ = self.get_collection(collection_id, user_id).await?;
+        let _ = self.authorize_collection(collection_id, user_id, WorkspaceRole::Viewer).await?;
         self.request_repo
             .find_all_by_collection(collection_id)
             .await
@@ -308,9 +244,7 @@ impl CollectionService {
         last_response: Option<Option<Value>>, // Allow manual update of response (e.g. paste from UI)
     ) -> Result<SavedRequest, AppError> {
         let mut req = self.request_repo.find_by_id(request_id).await?;
-        if req.user_id != user_id {
-            return Err(AppError::Forbidden("Not authorized".into()));
-        }
+        self.authorize_collection(req.collection_id, user_id, WorkspaceRole::Editor).await?;
 
         if let Some(n) = name {
             req.name = n;
@@ -351,9 +285,7 @@ impl CollectionService {
         user_id: ObjectId,
     ) -> Result<(), AppError> {
         let req = self.request_repo.find_by_id(request_id).await?;
-        if req.user_id != user_id {
-            return Err(AppError::Forbidden("Not authorized".into()));
-        }
+        self.authorize_collection(req.collection_id, user_id, WorkspaceRole::Editor).await?;
         self.request_repo.delete(request_id).await
     }
 
@@ -363,9 +295,8 @@ impl CollectionService {
         user_id: ObjectId,
     ) -> Result<(SavedRequest, Value), AppError> {
         let mut req = self.request_repo.find_by_id(request_id).await?;
-        if req.user_id != user_id {
-            return Err(AppError::Forbidden("Not authorized".into()));
-        }
+        // Running a saved request stores its last response on the shared document.
+        self.authorize_collection(req.collection_id, user_id, WorkspaceRole::Editor).await?;
 
         // Determine RPC URL first (needed for resolution and main call)
         let final_url = if let Some(ref url) = req.rpc_url {
@@ -576,7 +507,9 @@ mod tests {
         let collection_repo = CollectionRepository::new(&db);
         let request_repo = RequestRepository::new(&db);
         let user_repo = UserRepository::new(&db);
-        let workspace_repo = WorkspaceRepository::new(&db);
+        let workspace_repo = crate::repositories::workspace_repository::WorkspaceRepository::new(&db);
+        let members = crate::repositories::workspace_member_repository::WorkspaceMemberRepository::new(&db);
+        let access = crate::services::workspace_access::WorkspaceAccess::new(workspace_repo, members);
         let rpc_repo = crate::repositories::rpc_repository::RpcRepository::new(&db);
 
         let sui_service = SuiService::new(rpc_repo, "https://dummy.sui.io".to_string());
@@ -585,7 +518,7 @@ mod tests {
             collection_repo,
             request_repo,
             user_repo,
-            workspace_repo,
+            access,
             sui_service,
         )
     }

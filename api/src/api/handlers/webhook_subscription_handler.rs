@@ -1,4 +1,7 @@
-use crate::dtos::webhook_subscription_dtos::{CreateWebhookRequest, CreateWebhookResponse};
+use crate::dtos::webhook_subscription_dtos::{
+    CreateWebhookRequest, CreateWebhookResponse, RotateSecretResponse, WebhookDeliveryResponse,
+    WebhookSubscriptionResponse,
+};
 use crate::services::webhook_service::WebhookService;
 use crate::utils::auth_jwt::Claims;
 use crate::utils::error::AppError;
@@ -35,7 +38,69 @@ pub async fn list_webhooks(
     claims: Claims,
 ) -> Result<Json<Value>, AppError> {
     let subs = service.list(user_id(&claims)?).await?;
-    Ok(Json(serde_json::to_value(subs).unwrap()))
+    let body: Vec<WebhookSubscriptionResponse> = subs
+        .into_iter()
+        .map(|s| WebhookSubscriptionResponse {
+            id: s.id.map(|i| i.to_hex()).unwrap_or_default(),
+            url: s.url,
+            events: s.events,
+            is_active: s.is_active,
+            can_sign: s.secret_enc.is_some(),
+            last_delivered_at: s.last_delivered_at.map(|t| t.to_rfc3339()),
+            last_delivery_error: s.last_delivery_error,
+            created_at: s.created_at.to_rfc3339(),
+        })
+        .collect();
+    Ok(Json(serde_json::to_value(body).map_err(|_| AppError::InternalError("Serialization failed".into()))?))
+}
+
+fn parse_id(raw: &str, what: &str) -> Result<ObjectId, AppError> {
+    ObjectId::from_str(raw).map_err(|_| AppError::BadRequest(format!("Invalid {what}")))
+}
+
+pub async fn rotate_secret(
+    State(service): State<WebhookService>,
+    claims: Claims,
+    Path(id): Path<String>,
+) -> Result<Json<RotateSecretResponse>, AppError> {
+    let secret = service.rotate_secret(parse_id(&id, "webhook id")?, user_id(&claims)?).await?;
+    Ok(Json(RotateSecretResponse { secret }))
+}
+
+pub async fn list_deliveries(
+    State(service): State<WebhookService>,
+    claims: Claims,
+    Path(id): Path<String>,
+) -> Result<Json<Vec<WebhookDeliveryResponse>>, AppError> {
+    let deliveries = service.recent_deliveries(parse_id(&id, "webhook id")?, user_id(&claims)?).await?;
+    Ok(Json(
+        deliveries
+            .into_iter()
+            .map(|d| WebhookDeliveryResponse {
+                id: d.id.map(|i| i.to_hex()).unwrap_or_default(),
+                delivery_id: d.delivery_id,
+                event: d.event,
+                status: d.status,
+                attempts: d.attempts,
+                next_attempt_at: d.next_attempt_at.to_rfc3339(),
+                last_status_code: d.last_status_code,
+                last_error: d.last_error,
+                created_at: d.created_at.to_rfc3339(),
+                delivered_at: d.delivered_at.map(|t| t.to_rfc3339()),
+            })
+            .collect(),
+    ))
+}
+
+pub async fn redeliver(
+    State(service): State<WebhookService>,
+    claims: Claims,
+    Path((id, delivery_id)): Path<(String, String)>,
+) -> Result<Json<Value>, AppError> {
+    service
+        .redeliver(parse_id(&id, "webhook id")?, parse_id(&delivery_id, "delivery id")?, user_id(&claims)?)
+        .await?;
+    Ok(Json(json!({ "message": "Delivery queued" })))
 }
 
 pub async fn delete_webhook(

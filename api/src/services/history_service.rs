@@ -1,23 +1,22 @@
 use crate::model::history::HistoryEntry;
-use crate::repositories::{
-    history_repository::HistoryRepository, workspace_repository::WorkspaceRepository,
-};
+use crate::model::workspace_member::WorkspaceRole;
+use crate::repositories::history_repository::HistoryRepository;
+use crate::services::workspace_access::WorkspaceAccess;
 use crate::utils::error::AppError;
 use mongodb::bson::oid::ObjectId;
 use serde_json::Value;
 
+/// History stays per-user even in a shared workspace: a member sees their own
+/// runs, never a colleague's. Membership only decides who may use the workspace.
 #[derive(Clone)]
 pub struct HistoryService {
     history_repo: HistoryRepository,
-    workspace_repo: WorkspaceRepository,
+    access: WorkspaceAccess,
 }
 
 impl HistoryService {
-    pub fn new(history_repo: HistoryRepository, workspace_repo: WorkspaceRepository) -> Self {
-        Self {
-            history_repo,
-            workspace_repo,
-        }
+    pub fn new(history_repo: HistoryRepository, access: WorkspaceAccess) -> Self {
+        Self { history_repo, access }
     }
 
     async fn ensure_workspace_owner(
@@ -25,14 +24,7 @@ impl HistoryService {
         workspace_id: ObjectId,
         user_id: ObjectId,
     ) -> Result<(), AppError> {
-        let workspace = self.workspace_repo.find_by_id(workspace_id).await?;
-
-        if workspace.user_id != user_id {
-            return Err(AppError::Forbidden(
-                "Not authorized to access this workspace".into(),
-            ));
-        }
-
+        self.access.require(workspace_id, user_id, WorkspaceRole::Viewer).await?;
         Ok(())
     }
 

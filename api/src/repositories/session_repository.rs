@@ -2,7 +2,9 @@ use crate::model::session::Session;
 use crate::utils::error::AppError;
 use mongodb::bson::doc;
 use mongodb::bson::oid::ObjectId;
-use mongodb::{Collection, Database};
+use mongodb::options::IndexOptions;
+use mongodb::{Collection, Database, IndexModel};
+use std::time::Duration;
 
 #[derive(Clone)]
 pub struct SessionRepository {
@@ -14,6 +16,50 @@ impl SessionRepository {
         Self {
             collection: db.collection("sessions"),
         }
+    }
+
+    pub async fn ensure_indexes(&self) -> Result<(), AppError> {
+        let jti_index = IndexModel::builder()
+            .keys(doc! { "jti": 1 })
+            .options(
+                IndexOptions::builder()
+                    .name(Some("sessions_jti_idx".to_string()))
+                    .build(),
+            )
+            .build();
+        // A JWT lives 24h; drop session rows shortly after so the collection
+        // does not grow without bound.
+        let ttl_index = IndexModel::builder()
+            .keys(doc! { "created_at": 1 })
+            .options(
+                IndexOptions::builder()
+                    .name(Some("sessions_created_at_ttl".to_string()))
+                    .expire_after(Duration::from_secs(25 * 60 * 60))
+                    .build(),
+            )
+            .build();
+        self.collection
+            .create_indexes(vec![jti_index, ttl_index], None)
+            .await
+            .map(|_| ())
+            .map_err(AppError::Database)
+    }
+
+    /// True while a session row for this token id exists. Deleting the row
+    /// (logout, revoke, account delete) is what makes the JWT stop working.
+    pub async fn exists_by_jti(&self, jti: &str) -> Result<bool, AppError> {
+        Ok(self
+            .collection
+            .count_documents(doc! { "jti": jti }, None)
+            .await?
+            > 0)
+    }
+
+    pub async fn delete_by_jti(&self, jti: &str) -> Result<(), AppError> {
+        self.collection
+            .delete_many(doc! { "jti": jti }, None)
+            .await?;
+        Ok(())
     }
 
     pub async fn save(&self, session: &Session) -> Result<Session, AppError> {

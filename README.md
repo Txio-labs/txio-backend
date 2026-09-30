@@ -104,9 +104,8 @@ Flags:
 | :--- | :--- |
 | `MONGO_URI` | Database connection |
 | `JWT_SECRET` | Signs auth tokens |
+| `COOKIE_SECURE` / `COOKIE_SAMESITE` / `COOKIE_DOMAIN` | Browser session cookie attributes (see `.env.example`); use `COOKIE_SECURE=false` for local http |
 | `BREVO_API_KEY` | Sends OTP emails via Brevo |
-| `GROQ_API_KEYS` | Comma-separated Groq keys for the AI Console |
-| `GROQ_MODEL` | Groq model ID for the AI Console |
 
 ---
 

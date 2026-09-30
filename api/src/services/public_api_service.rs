@@ -1,6 +1,7 @@
 use mongodb::bson::oid::ObjectId;
 
-use crate::dtos::public_api_dtos::{ExecuteTransactionRequest, SimulateTransactionResponse};
+use crate::dtos::public_api_dtos::ExecuteTransactionRequest;
+use crate::repositories::idempotency_repository::{Begin, IdempotencyRepository};
 use crate::model::history::HistoryEntry;
 use crate::repositories::history_repository::HistoryRepository;
 use crate::services::session_key_service::SessionKeyService;
@@ -23,6 +24,7 @@ struct EvmTxTemplate {
 #[derive(Clone)]
 pub struct PublicApiService {
     history_repo: HistoryRepository,
+    idempotency_repo: IdempotencyRepository,
     session_key_service: SessionKeyService,
     spend_policy_service: SpendPolicyService,
 }
@@ -30,11 +32,13 @@ pub struct PublicApiService {
 impl PublicApiService {
     pub fn new(
         history_repo: HistoryRepository,
+        idempotency_repo: IdempotencyRepository,
         session_key_service: SessionKeyService,
         spend_policy_service: SpendPolicyService,
     ) -> Self {
         Self {
             history_repo,
+            idempotency_repo,
             session_key_service,
             spend_policy_service,
         }
@@ -56,19 +60,48 @@ impl PublicApiService {
         self.history_repo.find_by_user(user_id, None).await
     }
 
-    /// Deliberately a stub, not a fabricated result: real transaction
-    /// simulation exists today only in the frontend (transactionService.ts,
-    /// per-chain adapters calling each chain's own dry-run RPC method) —
-    /// there is no server-side chain-RPC simulation layer yet. Returning a
-    /// confidently-wrong "simulated: true" would be worse than an honest
-    /// "not implemented server-side" for something that gates real
-    /// transaction review. Flagged as follow-up work, same pattern as the
-    /// scheduler worker's price-feed and USD-valuation gaps.
-    pub fn simulate(&self, chain: &str) -> SimulateTransactionResponse {
-        SimulateTransactionResponse {
-            chain: chain.to_string(),
-            simulated: false,
-            note: "Server-side simulation is not implemented yet — this endpoint does not dry-run the transaction. Use the frontend's interactive simulation, or simulate client-side before calling execute.".to_string(),
+    /// Server-side simulation does not exist yet: simulation runs in each chain
+    /// adapter in the app, against that chain's own dry-run method. Answering
+    /// with a made-up result would be worse than saying so, so this is an
+    /// explicit 501 (`-32015`), not a 200 that looks like a check passed.
+    pub fn simulate(&self, chain: &str) -> Result<(), AppError> {
+        Err(AppError::NotImplemented(format!(
+            "Server-side simulation is not available for {chain}. Simulate with the txio app or CLI, then call execute."
+        )))
+    }
+
+    /// `execute` with an optional `Idempotency-Key`: a retried request with the
+    /// same key and body returns the first result instead of broadcasting again.
+    pub async fn execute_idempotent(
+        &self,
+        user_id: ObjectId,
+        idempotency_key: Option<&str>,
+        req: ExecuteTransactionRequest,
+    ) -> Result<String, AppError> {
+        let Some(key) = idempotency_key else {
+            return self.execute(user_id, req).await;
+        };
+
+        let request_hash = {
+            use sha2::{Digest, Sha256};
+            let canonical = format!("{}|{}|{}", req.chain, req.session_key_id, req.tx_params);
+            hex::encode(Sha256::digest(canonical.as_bytes()))
+        };
+
+        match self.idempotency_repo.begin(user_id, key, &request_hash).await? {
+            Begin::Replay(hash) => Ok(hash),
+            Begin::InProgress => Err(AppError::Conflict("A request with this Idempotency-Key is still in progress".into())),
+            Begin::Mismatch => Err(AppError::Conflict("This Idempotency-Key was already used for a different request".into())),
+            Begin::New => match self.execute(user_id, req).await {
+                Ok(hash) => {
+                    self.idempotency_repo.complete(user_id, key, &hash).await?;
+                    Ok(hash)
+                }
+                Err(e) => {
+                    let _ = self.idempotency_repo.abort(user_id, key).await;
+                    Err(e)
+                }
+            },
         }
     }
 

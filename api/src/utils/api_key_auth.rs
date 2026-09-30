@@ -48,6 +48,11 @@ where
     type Rejection = AppError;
 
     async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
+        // The public-API middleware already resolved and rate-limited this key.
+        if let Some(resolved) = parts.extensions.get::<ApiKeyAuth>() {
+            return Ok(resolved.clone());
+        }
+
         let auth_header = parts
             .headers
             .get(axum::http::header::AUTHORIZATION)

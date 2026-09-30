@@ -4,5 +4,7 @@ pub mod config;
 pub mod error;
 pub mod generate_otp;
 pub mod logger;
+pub mod rate_limit;
+pub mod session_cookie;
 pub mod session_key_crypto;
 pub mod url_safety;

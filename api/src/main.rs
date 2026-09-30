@@ -100,7 +100,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let workspace_repo = repositories::workspace_repository::WorkspaceRepository::new(&db);
     workspace_repo.ensure_indexes().await?;
 
+    let workspace_member_repo = repositories::workspace_member_repository::WorkspaceMemberRepository::new(&db);
+    workspace_member_repo.ensure_indices().await?;
+    let workspace_access = services::workspace_access::WorkspaceAccess::new(
+        workspace_repo.clone(),
+        workspace_member_repo.clone(),
+    );
+
     let session_repo = repositories::session_repository::SessionRepository::new(&db);
+    session_repo.ensure_indexes().await?;
+    let session_repo_for_auth = session_repo.clone();
 
     let history_repo = repositories::history_repository::HistoryRepository::new(&db);
     history_repo.ensure_indices().await?;
@@ -117,6 +126,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let webhook_subscription_repo =
         repositories::webhook_subscription_repository::WebhookSubscriptionRepository::new(&db);
     webhook_subscription_repo.ensure_indices().await?;
+    let webhook_delivery_repo =
+        repositories::webhook_delivery_repository::WebhookDeliveryRepository::new(&db);
+    webhook_delivery_repo.ensure_indices().await?;
 
     let api_key_repo = repositories::api_key_repository::ApiKeyRepository::new(&db);
     api_key_repo.ensure_indices().await?;
@@ -137,6 +149,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // 5.1 Initialize Support Services
     let email_service = services::email_service::EmailService::new(config.brevo_api_key);
+    let invite_email_service = email_service.clone();
     let otp_service = services::otp_service::OTPService::new(otp_repo.clone());
 
     // Default network URL for SuiService (can be overridden dynamically)
@@ -154,6 +167,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         config.admin_emails.clone(),
         config.google_oauth.clone(),
         config.github_oauth.clone(),
+        config.x_oauth.clone(),
         config.backend_url.clone(),
         config.frontend_url.clone(),
     );
@@ -162,13 +176,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         collection_repo.clone(),
         request_repo.clone(),
         user_repo.clone(),
-        workspace_repo.clone(),
+        workspace_access.clone(),
         sui_service,
     );
 
     let history_service = services::history_service::HistoryService::new(
         history_repo.clone(),
-        workspace_repo.clone(),
+        workspace_access.clone(),
     );
     // Cloned again here before workspace_service takes ownership below —
     // the public API's history endpoint needs its own handle.
@@ -179,6 +193,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         collection_repo,
         request_repo,
         history_repo,
+        workspace_member_repo,
+        user_repo.clone(),
+        invite_email_service,
+        config.frontend_url.clone(),
     );
 
     let recipe_template_service =
@@ -192,7 +210,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
 
     let terminal_service = services::terminal_service::TerminalService::new();
-    let ai_service = services::ai_service::AiService::from_env();
 
     let spend_policy_service =
         services::spend_policy_service::SpendPolicyService::new(spend_policy_repo);
@@ -204,7 +221,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         scheduled_task_repo,
         repositories::session_key_repository::SessionKeyRepository::new(&db),
     );
-    let webhook_service = services::webhook_service::WebhookService::new(webhook_subscription_repo);
+    let webhook_service = services::webhook_service::WebhookService::new(
+        webhook_subscription_repo,
+        webhook_delivery_repo,
+        config.session_key_encryption_key.clone(),
+    );
+    webhook_service.spawn_worker();
 
     let api_key_service = services::api_key_service::ApiKeyService::new(api_key_repo.clone());
 
@@ -233,8 +255,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
     let offramp_service =
         services::offramp_service::OfframpService::new(bridge_xyz_client, transak_client);
+    let idempotency_repo = repositories::idempotency_repository::IdempotencyRepository::new(&db);
+    idempotency_repo.ensure_indices().await?;
     let public_api_service = services::public_api_service::PublicApiService::new(
         public_history_repo,
+        idempotency_repo,
         session_key_service.clone(),
         spend_policy_service.clone(),
     );
@@ -251,11 +276,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     )
     .spawn();
 
-    tracing::info!(
-        groq_key_count = ai_service.configured_key_count(),
-        groq_model = %ai_service.model(),
-        "Configured AI service"
-    );
 
     let frontend_url =
         std::env::var("FRONTEND_URL").unwrap_or_else(|_| "http://localhost:3000".to_string());
@@ -284,6 +304,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             http::Method::GET,
             http::Method::POST,
             http::Method::PUT,
+            http::Method::PATCH,
             http::Method::DELETE,
             http::Method::OPTIONS,
         ])
@@ -291,6 +312,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             http::header::AUTHORIZATION,
             http::header::CONTENT_TYPE,
             http::header::ACCEPT,
+            http::header::HeaderName::from_static("x-requested-with"),
         ]);
 
     tracing::info!(
@@ -329,7 +351,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             "/api/v1/auth",
             api::routers::auth_router::router(auth_service),
         )
-        .nest("/api/v1/ai", api::routers::ai_router::router(ai_service))
         .nest(
             "/api/v1/collections",
             api::routers::collection_router::router(collection_service),
@@ -396,6 +417,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             config: governor_conf,
         })
         .layer(axum::Extension(jwt_helper))
+        .layer(axum::Extension(session_repo_for_auth))
+        .layer(axum::Extension(Arc::new(utils::rate_limit::KeyRateLimiter::new(
+            utils::rate_limit::RateLimits::from_env(),
+        ))))
         .layer(axum::Extension(api_key_repo))
         .layer(cors)
         .layer(tower_http::trace::TraceLayer::new_for_http());

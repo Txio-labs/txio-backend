@@ -80,4 +80,48 @@ impl WebhookSubscriptionRepository {
             .await?;
         Ok(())
     }
+
+    pub async fn find_by_id(&self, id: ObjectId) -> Result<Option<WebhookSubscription>, AppError> {
+        Ok(self.collection.find_one(doc! { "_id": id }, None).await?)
+    }
+
+    pub async fn find_owned(&self, id: ObjectId, user_id: ObjectId) -> Result<WebhookSubscription, AppError> {
+        self.collection
+            .find_one(doc! { "_id": id, "user_id": user_id }, None)
+            .await?
+            .ok_or_else(|| AppError::NotFound(format!("Webhook subscription not found: {id}")))
+    }
+
+    pub async fn replace_secret(
+        &self,
+        id: ObjectId,
+        user_id: ObjectId,
+        secret_hash: String,
+        secret_enc: String,
+    ) -> Result<(), AppError> {
+        let result = self
+            .collection
+            .update_one(
+                doc! { "_id": id, "user_id": user_id },
+                doc! { "$set": { "secret_hash": secret_hash, "secret_enc": secret_enc } },
+                None,
+            )
+            .await?;
+        if result.matched_count == 0 {
+            return Err(AppError::NotFound(format!("Webhook subscription not found: {id}")));
+        }
+        Ok(())
+    }
+
+    /// A receiver answering 410 Gone is asking not to be called again.
+    pub async fn deactivate(&self, id: ObjectId, reason: String) -> Result<(), AppError> {
+        self.collection
+            .update_one(
+                doc! { "_id": id },
+                doc! { "$set": { "is_active": false, "last_delivery_error": reason } },
+                None,
+            )
+            .await?;
+        Ok(())
+    }
 }

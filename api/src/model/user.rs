@@ -12,6 +12,14 @@ pub struct GitHubAccount {
     pub access_token: Option<String>,
 }
 
+/// An X (Twitter) identity linked to an account. X does not return an email
+/// address, so it can sign in an existing account but never create one.
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
+pub struct XAccount {
+    pub id: String,
+    pub username: String,
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct User {
     #[serde(rename = "_id", skip_serializing_if = "Option::is_none")]
@@ -32,6 +40,8 @@ pub struct User {
     pub created_at: DateTime<Utc>,
     #[serde(default)]
     pub github_account: Option<GitHubAccount>,
+    #[serde(default)]
+    pub x_account: Option<XAccount>,
     #[serde(default)]
     pub notification_preferences: NotificationPreferences,
     #[serde(default)]
@@ -86,6 +96,7 @@ impl User {
             network: Network::default(),
             created_at: Utc::now(),
             github_account: None,
+            x_account: None,
             notification_preferences: NotificationPreferences::default(),
             failed_login_attempts: 0,
             locked_until: None,

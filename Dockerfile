@@ -16,12 +16,15 @@ WORKDIR /workspace/txio-backend
 COPY Cargo.toml Cargo.lock ./
 COPY api ./api
 
-# Allow pinning a specific txio-cli ref for reproducible builds; defaults to
-# its default branch. txio-cli's own Cargo.toml declares a plain path
-# dependency on this repo's api/ crate at this exact sibling layout
-# (../txio-backend/api), so no patching is needed here.
-ARG TXIO_CLI_REF=main
-RUN git clone --depth 1 --branch "${TXIO_CLI_REF}" https://github.com/Txio-labs/txio-cli.git /workspace/txio-cli
+# TXIO_CLI_REF is a commit SHA (or a tag). Building from a moving branch makes
+# the image depend on whatever that branch holds today, so the default is
+# deliberately not a branch: pass --build-arg TXIO_CLI_REF=<sha>. `git fetch`
+# accepts a SHA where `git clone --branch` does not.
+ARG TXIO_CLI_REF
+RUN test -n "${TXIO_CLI_REF}" || (echo "Set --build-arg TXIO_CLI_REF=<commit sha or tag>" >&2; exit 1)
+RUN git init /workspace/txio-cli \
+    && git -C /workspace/txio-cli fetch --depth 1 https://github.com/Txio-labs/txio-cli.git "${TXIO_CLI_REF}" \
+    && git -C /workspace/txio-cli checkout --detach FETCH_HEAD
 
 WORKDIR /workspace/txio-backend
 RUN cargo build --release --package txio-api

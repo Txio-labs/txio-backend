@@ -25,6 +25,7 @@ pub struct AuthService {
     reserved_admin_emails: Vec<String>,
     pub google_oauth: Option<OAuthClientConfig>,
     pub github_oauth: Option<OAuthClientConfig>,
+    pub x_oauth: Option<OAuthClientConfig>,
     /// This deployment's own public base URL — used to build the
     /// `redirect_uri` sent to OAuth providers, which must exactly match
     /// what's registered in each provider's app settings.
@@ -50,6 +51,7 @@ impl AuthService {
             created_at: user.created_at.to_string(),
             notification_preferences: user.notification_preferences.clone(),
             github_account: user.github_account.clone(),
+            x_account: user.x_account.clone(),
             google_linked: user.google_sub.is_some(),
             is_admin: user.is_admin,
         }
@@ -66,6 +68,7 @@ impl AuthService {
         reserved_admin_emails: Vec<String>,
         google_oauth: Option<OAuthClientConfig>,
         github_oauth: Option<OAuthClientConfig>,
+        x_oauth: Option<OAuthClientConfig>,
         backend_url: String,
         frontend_url: String,
     ) -> Self {
@@ -79,6 +82,7 @@ impl AuthService {
             reserved_admin_emails,
             google_oauth,
             github_oauth,
+            x_oauth,
             backend_url,
             frontend_url,
         }
@@ -133,6 +137,19 @@ impl AuthService {
         );
 
         self.session_repo.save(&session).await
+    }
+
+    /// Delete every session for a user (used after an email change).
+    pub async fn end_all_sessions(&self, user_id: &str) -> Result<(), AppError> {
+        use std::str::FromStr;
+        let oid = mongodb::bson::oid::ObjectId::from_str(user_id)
+            .map_err(|_| AppError::InternalError("Invalid user ID".into()))?;
+        self.session_repo.delete_all_by_user_id(&oid).await
+    }
+
+    /// Delete the session for a token id (logout).
+    pub async fn end_session(&self, jti: &str) -> Result<(), AppError> {
+        self.session_repo.delete_by_jti(jti).await
     }
 
     /// Return all sessions belonging to the authenticated user.
@@ -466,6 +483,66 @@ impl AuthService {
         self.repo.update(&user).await
     }
 
+    /// Links an X identity to an existing account. Refuses one already
+    /// attached to a different account.
+    pub async fn link_x_account(&self, email: &str, x_account: crate::model::user::XAccount) -> Result<User, AppError> {
+        match self.repo.find_by_x_id(&x_account.id).await {
+            Ok(existing) if existing.email != Self::normalize_email(email) => {
+                return Err(AppError::Forbidden("This X account is already linked to a different user".into()));
+            }
+            Ok(_) => {}
+            Err(AppError::NotFound(_)) => {}
+            Err(e) => return Err(e),
+        }
+        let mut user = self.repo.find_by_email(email).await?;
+        user.x_account = Some(x_account);
+        self.repo.update(&user).await
+    }
+
+    pub async fn unlink_x_account(&self, email: &str) -> Result<User, AppError> {
+        let mut user = self.repo.find_by_email(email).await?;
+        user.x_account = None;
+        self.repo.update(&user).await
+    }
+
+    /// Signs in the account an X identity is linked to. X gives no email, so
+    /// an unknown X account cannot create one: the person signs in another way
+    /// and connects X from their profile.
+    pub async fn x_login(&self, x_account: &crate::model::user::XAccount) -> Result<AuthResponse, AppError> {
+        let user = match self.repo.find_by_x_id(&x_account.id).await {
+            Ok(u) => u,
+            Err(AppError::NotFound(_)) => {
+                return Err(AppError::BadRequest(
+                    "No txio account is linked to this X account. Sign in another way, then connect X from your profile.".into(),
+                ))
+            }
+            Err(e) => return Err(e),
+        };
+        let user_id = user.id.map(|id| id.to_string()).unwrap_or_default();
+        let (token, _jti) = self.jwt_helper.generate_token(&user_id, &user.email)?;
+        Ok(AuthResponse { token, user: Self::to_user_response(&user) })
+    }
+
+    /// Links a GitHub identity to an existing account (profile "Connect" flow).
+    /// Refuses an identity already attached to a different account.
+    pub async fn link_github_account(
+        &self,
+        email: &str,
+        github_account: crate::model::user::GitHubAccount,
+    ) -> Result<User, AppError> {
+        match self.repo.find_by_github_id(&github_account.id).await {
+            Ok(existing) if existing.email != Self::normalize_email(email) => {
+                return Err(AppError::Forbidden(
+                    "This GitHub account is already linked to a different user".into(),
+                ));
+            }
+            Ok(_) => {}
+            Err(AppError::NotFound(_)) => {}
+            Err(e) => return Err(e),
+        }
+        self.update_user_github_account(email, Some(github_account)).await
+    }
+
     pub async fn oauth_login_or_register(
         &self,
         google_sub: String,
@@ -673,6 +750,7 @@ mod oauth_tests {
             network: crate::model::network::Network::Mainnet,
             created_at: Utc::now(),
             github_account: None,
+            x_account: None,
             notification_preferences: crate::model::user::NotificationPreferences::default(),
             failed_login_attempts: 0,
             locked_until: None,

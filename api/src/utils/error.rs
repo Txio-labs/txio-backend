@@ -34,6 +34,15 @@ pub enum AppError {
 
     #[error("Forbidden: {0}")]
     Forbidden(String),
+
+    #[error("Too many requests")]
+    TooManyRequests { retry_after_secs: u64 },
+
+    #[error("Not implemented: {0}")]
+    NotImplemented(String),
+
+    #[error("Conflict: {0}")]
+    Conflict(String),
 }
 
 impl AppError {
@@ -57,6 +66,9 @@ impl AppError {
                 tracing::error!("Internal error: {}", msg);
                 (StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
             }
+            AppError::TooManyRequests { .. } => (StatusCode::TOO_MANY_REQUESTS, "Rate limit exceeded"),
+            AppError::NotImplemented(msg) => (StatusCode::NOT_IMPLEMENTED, msg.as_str()),
+            AppError::Conflict(msg) => (StatusCode::CONFLICT, msg.as_str()),
             AppError::ExternalService(msg) => {
                 tracing::error!("External service error: {}", msg);
                 (StatusCode::BAD_GATEWAY, "External service unavailable")
@@ -74,11 +86,21 @@ impl AppError {
 impl IntoResponse for AppError {
     fn into_response(self) -> Response {
         let (status, error_message) = self.status_and_message();
+        let retry_after = match &self {
+            AppError::TooManyRequests { retry_after_secs } => Some(*retry_after_secs),
+            _ => None,
+        };
 
         let body = Json(json!({
             "error": error_message,
         }));
 
-        (status, body).into_response()
+        let mut response = (status, body).into_response();
+        if let Some(secs) = retry_after {
+            if let Ok(value) = secs.to_string().parse() {
+                response.headers_mut().insert(axum::http::header::RETRY_AFTER, value);
+            }
+        }
+        response
     }
 }

@@ -55,6 +55,18 @@ pub struct ResetPasswordWithOTPRequest {
 pub struct UpdateEmailRequest {
     #[validate(email)]
     pub new_email: String,
+    /// One-time code sent to `new_email` (via `/auth/request-otp`), proving the
+    /// caller controls the address they are switching to.
+    #[validate(length(min = 6, max = 6))]
+    pub otp: String,
+}
+
+/// Confirms account deletion with a fresh one-time code sent to the account's
+/// own email, so a stolen session alone cannot delete the account.
+#[derive(Debug, Validate, Serialize, Deserialize)]
+pub struct DeleteUserRequest {
+    #[validate(length(min = 6, max = 6))]
+    pub otp: String,
 }
 
 #[derive(Debug, Validate, Serialize, Deserialize)]

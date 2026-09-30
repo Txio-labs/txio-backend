@@ -14,5 +14,8 @@ pub mod session_key;
 pub mod scheduled_task;
 pub mod spend_policy;
 pub mod user;
+pub mod webhook_delivery;
 pub mod webhook_subscription;
 pub mod workspace;
+pub mod workspace_comment;
+pub mod workspace_member;

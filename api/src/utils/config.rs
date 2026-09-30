@@ -9,6 +9,7 @@ pub struct Config {
     pub admin_emails: Vec<String>,
     pub google_oauth: Option<OAuthClientConfig>,
     pub github_oauth: Option<OAuthClientConfig>,
+    pub x_oauth: Option<OAuthClientConfig>,
     pub backend_url: String,
     pub frontend_url: String,
     /// Symmetric key (AES-256-GCM) session keys' ephemeral automation
@@ -90,6 +91,7 @@ impl Config {
 
         let google_oauth = oauth_client_from_env(&config, "GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET");
         let github_oauth = oauth_client_from_env(&config, "GITHUB_CLIENT_ID", "GITHUB_CLIENT_SECRET");
+        let x_oauth = oauth_client_from_env(&config, "X_CLIENT_ID", "X_CLIENT_SECRET");
 
         let lifi_api_key = config.get_string("LIFI_API_KEY").ok().filter(|s| !s.trim().is_empty());
         let lifi_base_url = config
@@ -131,6 +133,7 @@ impl Config {
             admin_emails,
             google_oauth,
             github_oauth,
+            x_oauth,
             backend_url,
             frontend_url,
             session_key_encryption_key,

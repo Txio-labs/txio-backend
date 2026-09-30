@@ -1,7 +1,6 @@
 pub mod admin_service;
 pub mod api_key_service;
 pub mod public_api_service;
-pub mod ai_service;
 pub mod auth_service;
 pub mod bridge_service;
 pub mod bridge_xyz_client;
@@ -21,4 +20,5 @@ pub mod spend_policy_service;
 pub mod sui_service;
 pub mod terminal_service;
 pub mod webhook_service;
+pub mod workspace_access;
 pub mod workspace_service;

@@ -1,4 +1,4 @@
-use crate::model::user::{GitHubAccount, NotificationPreferences};
+use crate::model::user::{GitHubAccount, NotificationPreferences, XAccount};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -9,6 +9,7 @@ pub struct UserResponse {
     pub created_at: String,
     pub notification_preferences: NotificationPreferences,
     pub github_account: Option<GitHubAccount>,
+    pub x_account: Option<XAccount>,
     pub google_linked: bool,
     pub is_admin: bool,
 }

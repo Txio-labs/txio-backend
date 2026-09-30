@@ -1,4 +1,6 @@
+use crate::repositories::session_repository::SessionRepository;
 use crate::utils::error::AppError;
+use crate::utils::session_cookie::{read_cookie, SESSION_COOKIE};
 use chrono::{Duration, Utc};
 use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, Validation};
 use serde::{Deserialize, Serialize};
@@ -81,20 +83,41 @@ where
     type Rejection = AppError;
 
     async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
-        // Extract the token from the authorization header
-        let auth_header = parts
+        // Non-browser clients send `Authorization: Bearer <jwt>`; browsers
+        // send the HttpOnly session cookie instead.
+        let (token, from_cookie) = match parts
             .headers
             .get(axum::http::header::AUTHORIZATION)
             .and_then(|value| value.to_str().ok())
-            .ok_or_else(|| AppError::Unauthorized("Missing authorization header".to_string()))?;
+        {
+            Some(auth_header) => {
+                let token = auth_header.strip_prefix("Bearer ").ok_or_else(|| {
+                    AppError::Unauthorized("Invalid authorization header format".to_string())
+                })?;
+                (token.to_string(), false)
+            }
+            None => match read_cookie(&parts.headers, SESSION_COOKIE) {
+                Some(token) => (token, true),
+                None => {
+                    return Err(AppError::Unauthorized(
+                        "Missing authorization header".to_string(),
+                    ))
+                }
+            },
+        };
 
-        if !auth_header.starts_with("Bearer ") {
-            return Err(AppError::Unauthorized(
-                "Invalid authorization header format".to_string(),
-            ));
+        // CSRF defence for cookie auth: state-changing requests must carry a
+        // custom header, which a cross-site form or simple request cannot set
+        // (and a cross-origin fetch with it is blocked by the CORS allowlist).
+        if from_cookie
+            && !matches!(
+                parts.method,
+                axum::http::Method::GET | axum::http::Method::HEAD | axum::http::Method::OPTIONS
+            )
+            && !parts.headers.contains_key("x-requested-with")
+        {
+            return Err(AppError::Forbidden("Missing CSRF header".to_string()));
         }
-
-        let token = auth_header[7..].to_string();
 
         // JwtHelper is built once in main.rs and shared via an Extension
         // layer on the whole app, so this no longer reloads Config/env
@@ -103,6 +126,20 @@ where
             .await
             .map_err(|_| AppError::InternalError("JWT helper not configured".into()))?;
 
-        helper.verify_token(&token)
+        let claims = helper.verify_token(&token)?;
+
+        // A session row must still exist: logout, revoke and account deletion
+        // delete it, which is what actually invalidates an issued JWT.
+        // Tokens issued before `jti` existed have none and age out via `exp`.
+        if let (Some(jti), Some(sessions)) = (
+            claims.jti.as_deref(),
+            parts.extensions.get::<SessionRepository>(),
+        ) {
+            if !sessions.exists_by_jti(jti).await? {
+                return Err(AppError::Unauthorized("Session revoked".to_string()));
+            }
+        }
+
+        Ok(claims)
     }
 }

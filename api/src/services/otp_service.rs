@@ -3,6 +3,7 @@ use crate::repositories::otp_repository::OTPRepository;
 use crate::utils::error::AppError;
 use crate::utils::generate_otp::generate_otp;
 use chrono::{Duration, Utc};
+use sha2::{Digest, Sha256};
 
 const OTP_LENGTH: usize = 6;
 pub(crate) const OTP_VALIDITY_MINUTES: i64 = 5;
@@ -37,7 +38,7 @@ impl OTPService {
         }
 
         let code = generate_otp(OTP_LENGTH);
-        let otp = OTP::new(email.to_string(), code.clone());
+        let otp = OTP::new(email.to_string(), hash_otp(email, &code));
         self.repository
             .upsert_otp(&otp, OTP_SEND_COOLDOWN_SECONDS)
             .await?;
@@ -65,7 +66,7 @@ impl OTPService {
             return Ok(false);
         }
 
-        if !constant_time_eq(&otp.otp, code) {
+        if !constant_time_eq(&otp.otp, &hash_otp(email, code)) {
             // Atomically increment the counter and derive the cap decision from
             // the post-increment value returned by the atomic operation.
             // This eliminates the lost-update race when concurrent wrong-code
@@ -84,6 +85,14 @@ impl OTPService {
         self.repository.delete_by_email(email).await?;
         Ok(true)
     }
+}
+
+/// One-time codes are stored as SHA-256(email:code), never in plaintext, so a
+/// read of the `otps` collection does not yield usable codes. Rows written
+/// before this change hold plaintext and simply fail verification; they
+/// expire within the TTL and the user requests a new code.
+fn hash_otp(email: &str, code: &str) -> String {
+    hex::encode(Sha256::digest(format!("{email}:{code}").as_bytes()))
 }
 
 /// Compares two strings in constant time relative to their length, so that
@@ -105,6 +114,13 @@ pub(crate) fn constant_time_eq(a: &str, b: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn hash_otp_is_deterministic_and_email_bound() {
+        assert_eq!(hash_otp("a@x.com", "123456"), hash_otp("a@x.com", "123456"));
+        assert_ne!(hash_otp("a@x.com", "123456"), hash_otp("b@x.com", "123456"));
+        assert_ne!(hash_otp("a@x.com", "123456"), "123456");
+    }
 
     #[test]
     fn test_constant_time_eq_matching() {

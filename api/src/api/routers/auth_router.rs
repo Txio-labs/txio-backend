@@ -92,6 +92,19 @@ pub fn router(service: AuthService) -> Router {
             "/google/callback",
             axum::routing::get(auth_handler::google_callback),
         )
+        .route("/providers", get(auth_handler::providers))
+        .route(
+            "/google/link/start",
+            post(auth_handler::google_link_start),
+        )
+        .route("/x/login", axum::routing::get(auth_handler::x_login))
+        .route("/x/callback", axum::routing::get(auth_handler::x_callback))
+        .route("/x/link/start", post(auth_handler::x_link_start))
+        .route("/x/unlink", post(auth_handler::x_unlink))
+        .route(
+            "/github/link/start",
+            post(auth_handler::github_link_start),
+        )
         .route(
             "/github/login",
             axum::routing::get(auth_handler::github_login),

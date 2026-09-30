@@ -1,4 +1,4 @@
-use crate::dtos::api_key_dtos::{CreateApiKeyRequest, CreateApiKeyResponse};
+use crate::dtos::api_key_dtos::{ApiKeyResponse, CreateApiKeyRequest, CreateApiKeyResponse};
 use crate::services::api_key_service::ApiKeyService;
 use crate::utils::auth_jwt::Claims;
 use crate::utils::error::AppError;
@@ -35,8 +35,21 @@ pub async fn list_api_keys(
     State(service): State<ApiKeyService>,
     claims: Claims,
 ) -> Result<Json<Value>, AppError> {
-    let keys = service.list(user_id(&claims)?).await?;
-    Ok(Json(serde_json::to_value(keys).unwrap()))
+    let keys: Vec<ApiKeyResponse> = service
+        .list(user_id(&claims)?)
+        .await?
+        .into_iter()
+        .map(|k| ApiKeyResponse {
+            id: k.id.map(|i| i.to_hex()).unwrap_or_default(),
+            label: k.label,
+            key_prefix: k.key_prefix,
+            scopes: k.scopes,
+            last_used_at: k.last_used_at.map(|t| t.to_rfc3339()),
+            revoked_at: k.revoked_at.map(|t| t.to_rfc3339()),
+            created_at: k.created_at.to_rfc3339(),
+        })
+        .collect();
+    Ok(Json(serde_json::to_value(keys).map_err(|_| AppError::InternalError("Serialization failed".into()))?))
 }
 
 pub async fn revoke_api_key(
