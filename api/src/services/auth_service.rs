@@ -573,6 +573,10 @@ impl AuthService {
 
         let user = match user {
             OAuthAccountResolution::Login(existing) => existing,
+            OAuthAccountResolution::LinkAndLogin { mut user, google_sub } => {
+                user.google_sub = Some(google_sub);
+                self.repo.update(&user).await?
+            }
             OAuthAccountResolution::Register { email, google_sub } => {
                 self.reject_reserved_email(&email)?;
                 let random_password = uuid::Uuid::new_v4().to_string();
@@ -629,9 +633,15 @@ impl AuthService {
                     ));
                 }
                 None => {
-                    return Err(AppError::Forbidden(
-                        "An account with this email already exists. Sign in with your password to link GitHub.".into(),
-                    ));
+                    if existing.google_sub.is_some() || existing.x_account.is_some() {
+                        let mut user = existing;
+                        user.github_account = Some(github_account);
+                        self.repo.update(&user).await?
+                    } else {
+                        return Err(AppError::Forbidden(
+                            "An account with this email already exists. Sign in with your password to link GitHub.".into(),
+                        ));
+                    }
                 }
             },
             (None, None) => {
@@ -667,6 +677,7 @@ fn verify_current_password(current_password: &str, password_hash: &str) -> Resul
 
 enum OAuthAccountResolution {
     Login(User),
+    LinkAndLogin { user: User, google_sub: String },
     Register { email: String, google_sub: String },
 }
 
@@ -686,9 +697,15 @@ fn resolve_oauth_account(
             Some(_) => Err(AppError::Unauthorized(
                 "This Google account is not linked to the existing user".into(),
             )),
-            None => Err(AppError::Forbidden(
-                "An account with this email already exists. Sign in with your password to link Google.".into(),
-            )),
+            None => {
+                if user.github_account.is_some() || user.x_account.is_some() {
+                    Ok(OAuthAccountResolution::LinkAndLogin { user, google_sub })
+                } else {
+                    Err(AppError::Forbidden(
+                        "An account with this email already exists. Sign in with your password to link Google.".into(),
+                    ))
+                }
+            }
         }
     } else {
         Ok(OAuthAccountResolution::Register { email, google_sub })
@@ -771,7 +788,7 @@ mod oauth_tests {
 
         match result {
             OAuthAccountResolution::Login(found) => assert_eq!(found.email, user.email),
-            OAuthAccountResolution::Register { .. } => panic!("expected login"),
+            _ => panic!("expected login"),
         }
     }
 
@@ -803,7 +820,7 @@ mod oauth_tests {
                 assert_eq!(email, "new@example.com");
                 assert_eq!(google_sub, "new-sub");
             }
-            OAuthAccountResolution::Login(_) => panic!("expected register"),
+            _ => panic!("expected register"),
         }
     }
 
@@ -818,5 +835,31 @@ mod oauth_tests {
         );
 
         assert!(matches!(result, Err(AppError::Unauthorized(_))));
+    }
+
+    #[test]
+    fn auto_links_google_for_github_registered_oauth_user() {
+        let mut user = sample_user("user@example.com", None);
+        user.github_account = Some(crate::model::user::GitHubAccount {
+            id: "github-123".to_string(),
+            login: "ghuser".to_string(),
+            access_token: None,
+        });
+
+        let result = resolve_oauth_account(
+            "google-sub-456".to_string(),
+            "user@example.com".to_string(),
+            None,
+            Some(user),
+        )
+        .unwrap();
+
+        match result {
+            OAuthAccountResolution::LinkAndLogin { user: linked, google_sub } => {
+                assert_eq!(linked.email, "user@example.com");
+                assert_eq!(google_sub, "google-sub-456");
+            }
+            _ => panic!("expected LinkAndLogin"),
+        }
     }
 }
