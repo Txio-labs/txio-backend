@@ -46,3 +46,7 @@ serde_with = "3.8"
 [[bin]]
 name = "bootstrap_admin"
 path = "src/bin/bootstrap_admin.rs"
+
+[[bin]]
+name = "delete_test_users"
+path = "src/bin/delete_test_users.rs"

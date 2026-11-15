@@ -292,6 +292,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     })?;
     let mut allowed_origins = vec![cors_origin];
 
+    // Optional second allowed origin (e.g. the apex domain when FRONTEND_URL
+    // points at the www subdomain, or vice versa).
+    if let Ok(alt_url) = std::env::var("FRONTEND_URL_ALT") {
+        let alt_origin = reqwest::Url::parse(&alt_url)
+            .map(|url| url.origin().ascii_serialization())
+            .unwrap_or_else(|_| alt_url.trim_end_matches('/').to_string());
+        match HeaderValue::from_str(&alt_origin) {
+            Ok(value) => allowed_origins.push(value),
+            Err(e) => tracing::error!(
+                error = %e,
+                frontend_origin_alt = %alt_origin,
+                "Invalid FRONTEND_URL_ALT for CORS"
+            ),
+        }
+    }
+
     // Add localhost origins only in development
     if cfg!(debug_assertions) || std::env::var("DEV_MODE").is_ok() {
         allowed_origins.push(HeaderValue::from_static("http://localhost:3000"));

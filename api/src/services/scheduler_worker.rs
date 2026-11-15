@@ -234,7 +234,7 @@ async fn broadcast_evm(template: &EvmTxTemplate, private_key_hex: &str) -> Resul
 fn evm_rpc_url_for(chain_id: u64) -> Result<String, String> {
     match chain_id {
         1 => Ok("https://cloudflare-eth.com".to_string()),
-        11155111 => Ok("https://rpc.sepolia.org".to_string()),
+        11155111 => Ok("https://ethereum-sepolia-rpc.publicnode.com".to_string()),
         137 => Ok("https://polygon.drpc.org".to_string()),
         8453 => Ok("https://mainnet.base.org".to_string()),
         other => Err(format!("No RPC endpoint configured for chain id {other}")),
