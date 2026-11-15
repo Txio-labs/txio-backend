@@ -5964,6 +5964,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "txio-compiler"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "base64 0.22.1",
+ "regex",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+ "tokio",
+ "tower-http 0.5.2",
+ "tracing",
+ "tracing-subscriber",
+ "uuid",
+]
+
+[[package]]
 name = "typed-builder"
 version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"

@@ -1,0 +1,22 @@
+[package]
+name = "txio-compiler"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Compiles Move, Soroban, Solana and Cairo contracts for txio's Contract Builder. Holds no secrets; run it isolated."
+repository.workspace = true
+homepage.workspace = true
+
+[dependencies]
+axum = { workspace = true }
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+tower-http = { workspace = true }
+base64 = { workspace = true }
+regex = { workspace = true }
+uuid = { workspace = true }
+thiserror = { workspace = true }

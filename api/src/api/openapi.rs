@@ -49,7 +49,7 @@ pub fn document() -> Value {
                     "description": "Requires scope `history:read`.",
                     "parameters": [
                         { "name": "wallet_address", "in": "query", "schema": { "type": "string" } },
-                        { "name": "wallet_family", "in": "query", "schema": { "type": "string", "enum": ["sui", "evm", "solana", "aptos", "stellar"] } },
+                        { "name": "wallet_family", "in": "query", "schema": { "type": "string", "enum": ["sui", "evm", "solana", "aptos", "stellar", "starknet"] } },
                         { "name": "chain", "in": "query", "schema": { "type": "string" } }
                     ],
                     "responses": {
@@ -167,7 +167,7 @@ pub fn document() -> Value {
                     "type": "object",
                     "required": ["chain", "tx_params"],
                     "properties": {
-                        "chain": { "type": "string", "enum": ["sui", "evm", "solana", "aptos", "stellar"] },
+                        "chain": { "type": "string", "enum": ["sui", "evm", "solana", "aptos", "stellar", "starknet"] },
                         "tx_params": { "description": "Chain-native transaction parameters, the same shape the txio app builds for that chain." }
                     }
                 },
