@@ -15,6 +15,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends pkg-config libs
 WORKDIR /workspace/txio-backend
 COPY Cargo.toml Cargo.lock ./
 COPY api ./api
+# Every workspace member must be present for cargo to load the workspace,
+# even though only txio-api is built here.
+COPY compiler ./compiler
 
 # TXIO_CLI_REF is a commit SHA (or a tag). Building from a moving branch makes
 # the image depend on whatever that branch holds today, so the default is

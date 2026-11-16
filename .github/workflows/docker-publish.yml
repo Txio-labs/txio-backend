@@ -39,3 +39,40 @@ jobs:
             TXIO_CLI_REF=${{ vars.TXIO_CLI_REF }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  # The Contract Builder's compile service. Runs code users submit, so it is
+  # deployed as its own service with no secrets (see compiler/Dockerfile).
+  compiler:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./compiler/Dockerfile
+          push: true
+          tags: |
+            ghcr.io/txio-labs/txio-compiler:latest
+            ghcr.io/txio-labs/txio-compiler:${{ github.sha }}
+          # Override with the repository variables SUI_VERSION / APTOS_CLI_VERSION.
+          build-args: |
+            SUI_VERSION=${{ vars.SUI_VERSION || 'mainnet-v1.83.1' }}
+            APTOS_CLI_VERSION=${{ vars.APTOS_CLI_VERSION || '9.6.0' }}
+          cache-from: type=gha,scope=compiler
+          cache-to: type=gha,mode=max,scope=compiler
