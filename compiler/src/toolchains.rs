@@ -13,6 +13,7 @@ use base64::{engine::general_purpose::STANDARD as B64, Engine as _};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use tokio::io::{AsyncRead, AsyncReadExt};
 use tokio::process::Command;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
@@ -151,6 +152,8 @@ pub fn package_name(name: &str) -> String {
 
 pub struct Runner {
     pub timeout: Duration,
+    /// Parallel rustc jobs per build (CARGO_BUILD_JOBS).
+    pub build_jobs: usize,
 }
 
 impl Runner {
@@ -175,6 +178,10 @@ impl Runner {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .kill_on_drop(true);
+        // Own process group, so the cargo and rustc processes a build spawns
+        // can be killed with it (see `kill_group`).
+        #[cfg(unix)]
+        cmd.process_group(0);
         // Toolchains need their install and cache locations, nothing else.
         for key in ["PATH", "HOME", "CARGO_HOME", "RUSTUP_HOME", "XDG_CACHE_HOME", "SCARB_CACHE", "LANG", "MOVE_HOME", "SUI_CONFIG_DIR"] {
             if let Ok(v) = std::env::var(key) {
@@ -182,24 +189,78 @@ impl Runner {
             }
         }
         cmd.env("CARGO_TERM_COLOR", "never").env("NO_COLOR", "1");
+        // Each rustc job can take 1 GB or more; cargo defaults to one job per CPU.
+        cmd.env("CARGO_BUILD_JOBS", self.build_jobs.to_string());
         for (key, value) in extra_env {
             cmd.env(key, value);
         }
 
-        let child = cmd.spawn().map_err(|e| {
+        let mut child = cmd.spawn().map_err(|e| {
             if e.kind() == std::io::ErrorKind::NotFound {
                 CompileError::MissingToolchain(leak_name(program))
             } else {
                 CompileError::Internal(format!("Could not start {program}: {e}"))
             }
         })?;
-        let output = tokio::time::timeout(self.timeout, child.wait_with_output())
-            .await
+        let pid = child.id();
+        let stdout = child.stdout.take().map(|s| tokio::spawn(read_capped(s, MAX_LOG_BYTES)));
+        let stderr = child.stderr.take().map(|s| tokio::spawn(read_capped(s, MAX_LOG_BYTES)));
+
+        let status = tokio::time::timeout(self.timeout, child.wait()).await;
+        // Always, not only on timeout: build tools can leave children running
+        // after the top process exits, and they would keep holding memory.
+        if let Some(pid) = pid {
+            kill_group(pid);
+        }
+        let _ = child.kill().await;
+
+        let mut logs = String::new();
+        for reader in [stdout, stderr].into_iter().flatten() {
+            // Every writer is dead, so the pipes close; the bound covers a
+            // process that escaped the group and still holds one open.
+            if let Ok(Ok(bytes)) = tokio::time::timeout(Duration::from_secs(5), reader).await {
+                logs.push_str(&String::from_utf8_lossy(&bytes));
+            }
+        }
+        let status = status
             .map_err(|_| CompileError::Timeout(self.timeout.as_secs()))?
             .map_err(|e| CompileError::Internal(e.to_string()))?;
-        let mut logs = String::from_utf8_lossy(&output.stdout).into_owned();
-        logs.push_str(&String::from_utf8_lossy(&output.stderr));
-        Ok((output.status.success(), logs))
+        Ok((status.success(), logs))
+    }
+}
+
+/// Most output kept per stream. A build can print far more (macro errors,
+/// a chatty dependency); the rest is read and dropped.
+const MAX_LOG_BYTES: usize = 256 * 1024;
+
+async fn read_capped<R: AsyncRead + Unpin>(mut reader: R, cap: usize) -> Vec<u8> {
+    let mut kept = Vec::new();
+    let mut dropped = 0usize;
+    let mut chunk = [0u8; 8192];
+    loop {
+        match reader.read(&mut chunk).await {
+            Ok(0) | Err(_) => break,
+            Ok(n) => {
+                let room = cap.saturating_sub(kept.len());
+                kept.extend_from_slice(&chunk[..n.min(room)]);
+                dropped += n.saturating_sub(room);
+            }
+        }
+    }
+    if dropped > 0 {
+        kept.extend_from_slice(format!("\n[{dropped} more bytes of output dropped]\n").as_bytes());
+    }
+    kept
+}
+
+/// SIGKILL to the whole process group the build started.
+fn kill_group(pid: u32) {
+    #[cfg(unix)]
+    if let Ok(pgid) = i32::try_from(pid) {
+        // SAFETY: killpg only sends a signal; a group that is already gone returns ESRCH.
+        unsafe {
+            libc::killpg(pgid, libc::SIGKILL);
+        }
     }
 }
 
@@ -263,13 +324,85 @@ fn solana_platform_tools() -> Option<PathBuf> {
     versions.pop()
 }
 
+fn cache_base() -> PathBuf {
+    std::env::var_os("COMPILER_CACHE_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| std::env::temp_dir().join("txio-compiler-cache"))
+}
+
 /// Shared `target` directory per chain, so dependencies compile once rather
 /// than on every request.
 fn target_dir(chain: Chain) -> PathBuf {
-    let base = std::env::var_os("COMPILER_CACHE_DIR")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| std::env::temp_dir().join("txio-compiler-cache"));
-    base.join(format!("{chain:?}").to_lowercase())
+    cache_base().join(format!("{chain:?}").to_lowercase())
+}
+
+/// Crate name for a build that uses a shared target directory: unique per
+/// build, so its own artifacts can be found and removed afterwards (see
+/// `remove_build_artifacts`) and concurrent builds never overwrite each other.
+fn unique_crate_name(name: &str) -> String {
+    let id = uuid::Uuid::new_v4().simple().to_string();
+    format!("{}_{}", package_name(name).chars().take(30).collect::<String>(), &id[..12])
+}
+
+/// Deletes one build's own outputs from a shared target directory, keeping
+/// the compiled dependencies other builds reuse. Matches `<crate>`,
+/// `<crate>-<hash>` and `lib<crate>` entries a few levels down.
+pub fn remove_build_artifacts(target: &Path, crate_name: &str) {
+    fn walk(dir: &Path, crate_name: &str, depth: u8) {
+        let Ok(entries) = std::fs::read_dir(dir) else { return };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let name = entry.file_name();
+            let name = name.to_string_lossy();
+            let ours = name.strip_prefix("lib").unwrap_or(&name).starts_with(crate_name);
+            let is_dir = entry.file_type().map(|t| t.is_dir()).unwrap_or(false);
+            if ours {
+                let _ = if is_dir { std::fs::remove_dir_all(&path) } else { std::fs::remove_file(&path) };
+            } else if is_dir && depth > 0 {
+                walk(&path, crate_name, depth - 1);
+            }
+        }
+    }
+    walk(target, crate_name, 4);
+}
+
+fn dir_size(path: &Path) -> u64 {
+    let Ok(entries) = std::fs::read_dir(path) else { return 0 };
+    entries
+        .flatten()
+        .map(|e| match e.file_type() {
+            Ok(t) if t.is_dir() => dir_size(&e.path()),
+            Ok(t) if t.is_file() => e.metadata().map(|m| m.len()).unwrap_or(0),
+            _ => 0,
+        })
+        .sum()
+}
+
+/// Keeps the shared build cache under `max_bytes`: removes whole per-chain
+/// target directories, largest first. A removed chain rebuilds its
+/// dependencies on its next compile. Returns the bytes freed.
+pub fn prune_cache(max_bytes: u64) -> u64 {
+    let mut chains: Vec<(PathBuf, u64)> = Chain::ALL
+        .iter()
+        .map(|c| target_dir(*c))
+        .map(|p| {
+            let size = dir_size(&p);
+            (p, size)
+        })
+        .collect();
+    let mut total: u64 = chains.iter().map(|(_, s)| s).sum();
+    chains.sort_by_key(|(_, size)| std::cmp::Reverse(*size));
+    let mut freed = 0;
+    for (path, size) in chains {
+        if total <= max_bytes {
+            break;
+        }
+        if std::fs::remove_dir_all(&path).is_ok() {
+            total -= size;
+            freed += size;
+        }
+    }
+    freed
 }
 
 const RUST_RELEASE_PROFILE: &str = r#"
@@ -296,7 +429,14 @@ impl Runner {
     }
 
     async fn stellar(&self, dir: &Path, req: &CompileRequest) -> Result<CompileResponse, CompileError> {
-        let name = package_name(&req.name);
+        let name = unique_crate_name(&req.name);
+        let target = target_dir(Chain::Stellar);
+        let result = self.stellar_build(dir, req, &name, &target).await;
+        remove_build_artifacts(&target, &name);
+        result
+    }
+
+    async fn stellar_build(&self, dir: &Path, req: &CompileRequest, name: &str, target: &Path) -> Result<CompileResponse, CompileError> {
         write(
             &dir.join("Cargo.toml"),
             &format!(
@@ -305,14 +445,13 @@ impl Runner {
             ),
         )?;
         write(&dir.join("src/lib.rs"), &req.source)?;
-        let target = target_dir(Chain::Stellar);
         let out = dir.join("out");
         let (ok, logs) = self
             .run_env(
                 dir,
                 "stellar",
                 &["contract", "build", "--manifest-path", "Cargo.toml", "--out-dir", out.to_str().unwrap_or("out")],
-                &[("CARGO_TARGET_DIR", &target)],
+                &[("CARGO_TARGET_DIR", target)],
             )
             .await?;
         if !ok {
@@ -323,7 +462,14 @@ impl Runner {
     }
 
     async fn solana(&self, dir: &Path, req: &CompileRequest) -> Result<CompileResponse, CompileError> {
-        let name = package_name(&req.name);
+        let name = unique_crate_name(&req.name);
+        let target = target_dir(Chain::Solana);
+        let result = self.solana_build(dir, req, &name, &target).await;
+        remove_build_artifacts(&target, &name);
+        result
+    }
+
+    async fn solana_build(&self, dir: &Path, req: &CompileRequest, name: &str, target: &Path) -> Result<CompileResponse, CompileError> {
         let anchor = req.source.contains("anchor_lang");
         let mut source = req.source.clone();
         if let Some(id) = &req.program_id {
@@ -350,7 +496,6 @@ impl Runner {
         )?;
         write(&dir.join("src/lib.rs"), &source)?;
         let out = dir.join("out");
-        let target = target_dir(Chain::Solana);
         // SBPF v3: mainnet executes it, and clusters with SIMD-0500 active
         // (local validators today) refuse to deploy anything older.
         let arch = std::env::var("SOLANA_SBPF_ARCH").unwrap_or_else(|_| "v3".into());
@@ -365,7 +510,7 @@ impl Runner {
             paths.extend(std::env::var_os("PATH").map(|p| std::env::split_paths(&p).collect::<Vec<_>>()).unwrap_or_default());
             PathBuf::from(std::env::join_paths(paths).unwrap_or_default())
         });
-        let mut env: Vec<(&str, &Path)> = vec![("CARGO_TARGET_DIR", &target)];
+        let mut env: Vec<(&str, &Path)> = vec![("CARGO_TARGET_DIR", target)];
         if let (Some(rustc), Some(path)) = (&rustc, &path) {
             args.push("--no-rustup-override");
             env.push(("RUSTC", rustc));
@@ -499,6 +644,50 @@ impl Runner {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn unique_crate_names_differ_and_stay_valid() {
+        let a = unique_crate_name("My Counter!");
+        let b = unique_crate_name("My Counter!");
+        assert_ne!(a, b);
+        assert!(a.starts_with("my_counter_"));
+        assert!(a.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_'));
+    }
+
+    #[test]
+    fn removes_only_the_builds_own_artifacts() {
+        let root = std::env::temp_dir().join(format!("txio-artifacts-{}", uuid::Uuid::new_v4()));
+        let release = root.join("wasm32v1-none/release");
+        let ours = "counter_abc123";
+        for path in [
+            release.join(format!("{ours}.wasm")),
+            release.join(format!("deps/{ours}-1f2e.wasm")),
+            release.join(format!("deps/lib{ours}-1f2e.rlib")),
+            release.join(format!(".fingerprint/{ours}-1f2e/lib")),
+            release.join("deps/soroban_sdk-9a8b.rlib"),
+            release.join(".fingerprint/soroban_sdk-9a8b/lib"),
+        ] {
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(&path, b"x").unwrap();
+        }
+        remove_build_artifacts(&root, ours);
+        assert!(!release.join(format!("{ours}.wasm")).exists());
+        assert!(!release.join(format!("deps/{ours}-1f2e.wasm")).exists());
+        assert!(!release.join(format!("deps/lib{ours}-1f2e.rlib")).exists());
+        assert!(!release.join(format!(".fingerprint/{ours}-1f2e")).exists());
+        assert!(release.join("deps/soroban_sdk-9a8b.rlib").exists());
+        assert!(release.join(".fingerprint/soroban_sdk-9a8b/lib").exists());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[tokio::test]
+    async fn caps_captured_output() {
+        let input = [b'a'; 100];
+        let kept = read_capped(&input[..], 10).await;
+        let text = String::from_utf8(kept).unwrap();
+        assert!(text.starts_with("aaaaaaaaaa\n"));
+        assert!(text.contains("[90 more bytes of output dropped]"));
+    }
+
     use super::*;
 
     #[test]

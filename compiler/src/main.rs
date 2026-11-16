@@ -12,7 +12,12 @@
 //! - `COMPILER_PORT` (default 8090)
 //! - `COMPILER_ALLOWED_ORIGINS`: comma-separated browser origins (default http://localhost:3000)
 //! - `COMPILER_MAX_CONCURRENT` (default 2), `COMPILER_TIMEOUT_SECS` (default 600)
-//! - `COMPILER_CACHE_DIR`: shared build caches (default: system temp dir)
+//! - `COMPILER_CACHE_DIR`: shared build caches (default: system temp dir).
+//!   Put it on disk, not a tmpfs: a tmpfs counts against the memory limit.
+//! - `COMPILER_CACHE_MAX_MB` (default 3072): after every compile, the cache
+//!   is pruned back under this size
+//! - `COMPILER_BUILD_JOBS` (default 2): parallel rustc jobs per build. Peak
+//!   memory is roughly MAX_CONCURRENT x BUILD_JOBS x 1 GB for Rust chains
 
 mod toolchains;
 
@@ -29,11 +34,12 @@ use serde_json::json;
 use tokio::sync::Semaphore;
 use tower_http::cors::CorsLayer;
 
-use toolchains::{check_source, tool_available, Chain, CompileError, CompileRequest, Runner, MAX_SOURCE_BYTES};
+use toolchains::{check_source, prune_cache, tool_available, Chain, CompileError, CompileRequest, Runner, MAX_SOURCE_BYTES};
 
 struct AppState {
     runner: Runner,
     permits: Semaphore,
+    cache_max_bytes: u64,
 }
 
 impl IntoResponse for CompileError {
@@ -82,7 +88,18 @@ async fn compile(State(state): State<Arc<AppState>>, Json(req): Json<CompileRequ
     let started = std::time::Instant::now();
     let result = state.runner.compile(&dir, &req).await;
     let _ = std::fs::remove_dir_all(&dir);
-    tracing::info!(chain = ?req.chain, ok = result.as_ref().map(|r| r.ok).unwrap_or(false), ms = started.elapsed().as_millis() as u64, "compile");
+    // Still holding the permit, so no build is writing the cache meanwhile
+    // unless MAX_CONCURRENT > 1; pruning only removes whole chain caches, which
+    // cargo recreates if a concurrent build needs them.
+    let max = state.cache_max_bytes;
+    let freed = tokio::task::spawn_blocking(move || prune_cache(max)).await.unwrap_or(0);
+    tracing::info!(
+        chain = ?req.chain,
+        ok = result.as_ref().map(|r| r.ok).unwrap_or(false),
+        ms = started.elapsed().as_millis() as u64,
+        cache_freed_mb = freed / (1024 * 1024),
+        "compile"
+    );
     Ok(Json(result?))
 }
 
@@ -97,8 +114,12 @@ pub fn router() -> Router {
         .filter_map(|o| HeaderValue::from_str(o.trim()).ok())
         .collect();
     let state = Arc::new(AppState {
-        runner: Runner { timeout: Duration::from_secs(env_or("COMPILER_TIMEOUT_SECS", 600)) },
+        runner: Runner {
+            timeout: Duration::from_secs(env_or("COMPILER_TIMEOUT_SECS", 600)),
+            build_jobs: env_or("COMPILER_BUILD_JOBS", 2usize).max(1),
+        },
         permits: Semaphore::new(env_or("COMPILER_MAX_CONCURRENT", 2)),
+        cache_max_bytes: env_or("COMPILER_CACHE_MAX_MB", 3072u64) * 1024 * 1024,
     });
     Router::new()
         .route("/health", get(|| async { "ok" }))

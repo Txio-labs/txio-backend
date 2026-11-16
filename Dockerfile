@@ -33,7 +33,15 @@ WORKDIR /workspace/txio-backend
 RUN cargo build --release --package txio-api
 
 WORKDIR /workspace/txio-cli
-RUN cargo build --release --package txio
+# txio-cli's lockfile predates crates the api crate now pulls in (alloy ->
+# interprocess). Resolved fresh, interprocess comes out newer than the tokio
+# the CLI locks can compile, so pin both to the versions this repo locks.
+RUN set -e; for p in tokio interprocess; do \
+        v=$(grep -A1 "^name = \"$p\"$" /workspace/txio-backend/Cargo.lock | sed -n 's/^version = "\(.*\)"$/\1/p' | head -1); \
+        test -n "$v" || { echo "$p is not in txio-backend's Cargo.lock" >&2; exit 1; }; \
+        cargo update -p "$p" --precise "$v"; \
+    done; \
+    cargo build --release --package txio
 
 # Runtime stage
 # Use a minimal base image for runtime to reduce attack surface
