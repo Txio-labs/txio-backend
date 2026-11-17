@@ -111,6 +111,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     session_repo.ensure_indexes().await?;
     let session_repo_for_auth = session_repo.clone();
 
+    let desktop_code_repo =
+        repositories::desktop_auth_code_repository::DesktopAuthCodeRepository::new(&db);
+    desktop_code_repo.ensure_indexes().await?;
+
     let history_repo = repositories::history_repository::HistoryRepository::new(&db);
     history_repo.ensure_indices().await?;
 
@@ -161,6 +165,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         user_repo.clone(),
         rpc_repo.clone(),
         session_repo.clone(),
+        desktop_code_repo,
         jwt_helper.clone(),
         otp_service,
         email_service,

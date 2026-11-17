@@ -3,6 +3,7 @@ pub mod bridge_chain;
 pub mod bridge_offramp;
 pub mod bridge_order;
 pub mod collection;
+pub mod desktop_auth_code;
 pub mod history;
 pub mod network;
 pub mod otp;

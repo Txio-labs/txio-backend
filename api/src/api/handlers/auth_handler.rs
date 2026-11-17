@@ -150,6 +150,44 @@ pub async fn login(
     ))
 }
 
+#[derive(serde::Deserialize)]
+pub struct DesktopCodeRequest {
+    pub challenge: String,
+}
+
+/// POST /auth/desktop/code — the signed-in website asks for a one-time code
+/// that hands this sign-in to Txio Desktop. Requires a session.
+pub async fn desktop_code(
+    State(service): State<AuthService>,
+    claims: crate::utils::auth_jwt::Claims,
+    Json(payload): Json<DesktopCodeRequest>,
+) -> Result<Json<Value>, AppError> {
+    let code = service.create_desktop_code(&claims.sub, &payload.challenge).await?;
+    Ok(Json(json!({ "code": code })))
+}
+
+#[derive(serde::Deserialize)]
+pub struct DesktopExchangeRequest {
+    pub code: String,
+    pub verifier: String,
+}
+
+/// POST /auth/desktop/exchange — Txio Desktop redeems the code with its PKCE
+/// verifier and gets a session cookie, exactly like a password login.
+pub async fn desktop_exchange(
+    State(service): State<AuthService>,
+    headers: HeaderMap,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    Json(payload): Json<DesktopExchangeRequest>,
+) -> Result<impl IntoResponse, AppError> {
+    let response = service.exchange_desktop_code(&payload.code, &payload.verifier).await?;
+    record_login_session(&service, &response.token, &headers, &addr).await?;
+    Ok((
+        [(header::SET_COOKIE, session_cookie(&response.token))],
+        Json(response),
+    ))
+}
+
 /// GET /auth/sessions — list active sessions for the authenticated user.
 pub async fn list_sessions(
     State(service): State<AuthService>,

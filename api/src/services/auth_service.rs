@@ -3,6 +3,7 @@ use crate::dtos::response::{AuthResponse, SessionResponse, UserResponse};
 use crate::model::rpc::RpcLog;
 use crate::model::session::Session;
 use crate::model::user::{NotificationPreferences, User};
+use crate::repositories::desktop_auth_code_repository::{DesktopAuthCodeRepository, DESKTOP_CODE_TTL_SECONDS};
 use crate::repositories::rpc_repository::RpcRepository;
 use crate::repositories::session_repository::SessionRepository;
 use crate::repositories::user_repository::UserRepository;
@@ -18,6 +19,7 @@ pub struct AuthService {
     repo: UserRepository,
     rpc_repo: RpcRepository,
     session_repo: SessionRepository,
+    desktop_code_repo: DesktopAuthCodeRepository,
     jwt_helper: JwtHelper,
     otp_service: OTPService,
     email_service: EmailService,
@@ -62,6 +64,7 @@ impl AuthService {
         repo: UserRepository,
         rpc_repo: RpcRepository,
         session_repo: SessionRepository,
+        desktop_code_repo: DesktopAuthCodeRepository,
         jwt_helper: JwtHelper,
         otp_service: OTPService,
         email_service: EmailService,
@@ -76,6 +79,7 @@ impl AuthService {
             repo,
             rpc_repo,
             session_repo,
+            desktop_code_repo,
             jwt_helper,
             otp_service,
             email_service,
@@ -110,6 +114,70 @@ impl AuthService {
     /// Used by handlers that need to read the `jti` from a just-issued token.
     pub fn verify_token(&self, token: &str) -> Result<Claims, AppError> {
         self.jwt_helper.verify_token(token)
+    }
+
+    // ── Desktop sign-in handoff ─────────────────────────────────────────────
+
+    /// Issue a one-time code that signs Txio Desktop in as `user_id`. Called by
+    /// the website once the user is signed in there and confirms. `challenge` is
+    /// base64url(SHA-256(verifier)) from the desktop app (PKCE S256).
+    pub async fn create_desktop_code(&self, user_id: &str, challenge: &str) -> Result<String, AppError> {
+        use mongodb::bson::oid::ObjectId;
+        use rand::RngCore;
+        use std::str::FromStr;
+
+        if !is_pkce_value(challenge, 43, 43) {
+            return Err(AppError::BadRequest("Invalid desktop sign-in challenge".into()));
+        }
+        let user_id = ObjectId::from_str(user_id)
+            .map_err(|_| AppError::InternalError("Invalid user ID".into()))?;
+
+        let mut bytes = [0u8; 32];
+        rand::rng().fill_bytes(&mut bytes);
+        let code = base64::Engine::encode(&base64::engine::general_purpose::URL_SAFE_NO_PAD, bytes);
+
+        self.desktop_code_repo
+            .save(&crate::model::desktop_auth_code::DesktopAuthCode {
+                id: None,
+                code_hash: sha256_hex(&code),
+                user_id,
+                challenge: challenge.to_string(),
+                created_at: Utc::now(),
+            })
+            .await?;
+        Ok(code)
+    }
+
+    /// Redeem a desktop sign-in code with the PKCE verifier and sign the user
+    /// in. The code is deleted on the first attempt, right or wrong.
+    pub async fn exchange_desktop_code(&self, code: &str, verifier: &str) -> Result<AuthResponse, AppError> {
+        let invalid = || AppError::Unauthorized("This sign-in code is invalid or has expired. Start again from Txio Desktop.".into());
+        if !is_pkce_value(code, 43, 43) || !is_pkce_value(verifier, 43, 128) {
+            return Err(invalid());
+        }
+        let row = self.desktop_code_repo.take(&sha256_hex(code)).await?.ok_or_else(invalid)?;
+
+        let age = Utc::now().signed_duration_since(row.created_at).num_seconds();
+        if age < 0 || age > DESKTOP_CODE_TTL_SECONDS as i64 {
+            return Err(invalid());
+        }
+        let computed = {
+            use sha2::Digest;
+            base64::Engine::encode(
+                &base64::engine::general_purpose::URL_SAFE_NO_PAD,
+                sha2::Sha256::digest(verifier.as_bytes()),
+            )
+        };
+        if !constant_time_eq(computed.as_bytes(), row.challenge.as_bytes()) {
+            return Err(invalid());
+        }
+
+        let user = self.repo.find_by_id(&row.user_id).await.map_err(|_| invalid())?;
+        let (token, _jti) = self.jwt_helper.generate_token(&row.user_id.to_string(), &user.email)?;
+        Ok(AuthResponse {
+            token,
+            user: Self::to_user_response(&user),
+        })
     }
 
     // ── Session helpers ──────────────────────────────────────────────────────
@@ -818,5 +886,51 @@ mod oauth_tests {
         );
 
         assert!(matches!(result, Err(AppError::Unauthorized(_))));
+    }
+}
+
+/// base64url characters only, within a length range (PKCE verifiers, challenges, codes).
+fn is_pkce_value(s: &str, min: usize, max: usize) -> bool {
+    (min..=max).contains(&s.len())
+        && s.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+}
+
+fn sha256_hex(s: &str) -> String {
+    use sha2::Digest;
+    hex::encode(sha2::Sha256::digest(s.as_bytes()))
+}
+
+fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
+    a.len() == b.len() && a.iter().zip(b).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
+}
+
+#[cfg(test)]
+mod desktop_code_tests {
+    use super::*;
+
+    #[test]
+    fn pkce_value_rules() {
+        assert!(is_pkce_value(&"a".repeat(43), 43, 43));
+        assert!(!is_pkce_value(&"a".repeat(42), 43, 43));
+        assert!(!is_pkce_value(&format!("{}=", "a".repeat(42)), 43, 43));
+        assert!(is_pkce_value("abc-_XYZ", 1, 10));
+    }
+
+    #[test]
+    fn s256_matches_rfc7636_example() {
+        use sha2::Digest;
+        let verifier = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk";
+        let challenge = base64::Engine::encode(
+            &base64::engine::general_purpose::URL_SAFE_NO_PAD,
+            sha2::Sha256::digest(verifier.as_bytes()),
+        );
+        assert_eq!(challenge, "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM");
+    }
+
+    #[test]
+    fn constant_time_eq_works() {
+        assert!(constant_time_eq(b"abc", b"abc"));
+        assert!(!constant_time_eq(b"abc", b"abd"));
+        assert!(!constant_time_eq(b"abc", b"ab"));
     }
 }
