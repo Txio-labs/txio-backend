@@ -3,6 +3,7 @@ pub mod api_key_repository;
 pub mod bridge_offramp_repository;
 pub mod bridge_order_repository;
 pub mod collection_repository;
+pub mod desktop_auth_code_repository;
 pub mod history_repository;
 pub mod idempotency_repository;
 pub mod otp_repository;

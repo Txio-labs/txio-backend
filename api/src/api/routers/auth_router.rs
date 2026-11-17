@@ -34,6 +34,14 @@ pub fn router(service: AuthService) -> Router {
             .expect("valid governor rate-limit configuration"),
     );
 
+    let desktop_exchange_rate_limiter = Arc::new(
+        GovernorConfigBuilder::default()
+            .per_millisecond(200)
+            .burst_size(10)
+            .finish()
+            .expect("valid governor rate-limit configuration"),
+    );
+
     Router::new()
         .route("/health", get(|| async { Json(json!({ "status": "ok" })) }))
         .route("/register", post(auth_handler::register))
@@ -53,6 +61,13 @@ pub fn router(service: AuthService) -> Router {
             "/verify-otp",
             post(auth_handler::verify_otp).layer(GovernorLayer {
                 config: otp_verify_rate_limiter,
+            }),
+        )
+        .route("/desktop/code", post(auth_handler::desktop_code))
+        .route(
+            "/desktop/exchange",
+            post(auth_handler::desktop_exchange).layer(GovernorLayer {
+                config: desktop_exchange_rate_limiter,
             }),
         )
         .route("/profile", axum::routing::get(auth_handler::profile))
