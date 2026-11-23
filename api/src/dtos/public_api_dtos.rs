@@ -1,4 +1,4 @@
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 /// A history entry as the public API returns it: the documented fields only,
@@ -62,4 +62,49 @@ pub struct ExecuteTransactionRequest {
     pub session_key_id: String,
     pub chain: String,
     pub tx_params: Value,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct AddressOwnerQuery {
+    pub address: String,
+    pub chain: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct AddressLabelRequest {
+    pub address: String,
+    pub chain: String,
+    pub label: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct AddressLabelEntry {
+    pub chain: String,
+    pub label: String,
+    pub updated_at: String,
+}
+
+/// A Txio account that controls the address and has opted in to being found.
+#[derive(Debug, Serialize)]
+pub struct AccountEntry {
+    pub display_name: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct AddressOwnersResponse {
+    pub address: String,
+    pub chain: Option<String>,
+    /// Labels the calling key's user saved for this address. Nobody else's labels are returned.
+    pub labels: Vec<AddressLabelEntry>,
+    /// Opted-in Txio accounts that control this address.
+    pub accounts: Vec<AccountEntry>,
+    /// Sources that could not be checked, so an empty list is not read as "no owner".
+    pub unavailable_sources: Vec<&'static str>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct AddressLabelResponse {
+    pub address: String,
+    pub chain: String,
+    pub label: String,
 }

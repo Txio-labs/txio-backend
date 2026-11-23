@@ -1,9 +1,15 @@
+use std::collections::HashSet;
+
 use mongodb::bson::oid::ObjectId;
 
-use crate::dtos::public_api_dtos::ExecuteTransactionRequest;
-use crate::repositories::idempotency_repository::{Begin, IdempotencyRepository};
+use crate::dtos::public_api_dtos::{AccountEntry, AddressLabelEntry, AddressOwnersResponse, ExecuteTransactionRequest};
+use crate::model::address_label::normalize_address;
 use crate::model::history::HistoryEntry;
+use crate::repositories::address_label_repository::AddressLabelRepository;
 use crate::repositories::history_repository::HistoryRepository;
+use crate::repositories::idempotency_repository::{Begin, IdempotencyRepository};
+use crate::repositories::session_key_repository::SessionKeyRepository;
+use crate::repositories::user_repository::UserRepository;
 use crate::services::session_key_service::SessionKeyService;
 use crate::services::spend_policy_service::SpendPolicyService;
 use crate::utils::error::AppError;
@@ -27,6 +33,9 @@ pub struct PublicApiService {
     idempotency_repo: IdempotencyRepository,
     session_key_service: SessionKeyService,
     spend_policy_service: SpendPolicyService,
+    label_repo: AddressLabelRepository,
+    user_repo: UserRepository,
+    session_key_repo: SessionKeyRepository,
 }
 
 impl PublicApiService {
@@ -35,13 +44,80 @@ impl PublicApiService {
         idempotency_repo: IdempotencyRepository,
         session_key_service: SessionKeyService,
         spend_policy_service: SpendPolicyService,
+        label_repo: AddressLabelRepository,
+        user_repo: UserRepository,
+        session_key_repo: SessionKeyRepository,
     ) -> Self {
         Self {
             history_repo,
             idempotency_repo,
             session_key_service,
             spend_policy_service,
+            label_repo,
+            user_repo,
+            session_key_repo,
         }
+    }
+
+    /// Saves the caller's label for one address on one chain, replacing any earlier one.
+    pub async fn set_label(&self, user_id: ObjectId, chain: &str, address: &str, label: &str) -> Result<(), AppError> {
+        self.label_repo.upsert(user_id, chain, address, label).await
+    }
+
+    /// Who an address belongs to, from the sources that can answer:
+    /// the caller's own labels, and opted-in Txio accounts that control the
+    /// address through a session key. On-chain names are not checked yet and
+    /// are reported in `unavailable_sources`.
+    pub async fn address_owners(
+        &self,
+        user_id: ObjectId,
+        address: &str,
+        chain: Option<&str>,
+    ) -> Result<AddressOwnersResponse, AppError> {
+        let normalized = normalize_address(address);
+        let labels = self
+            .label_repo
+            .find_by_address(user_id, &normalized, chain)
+            .await?
+            .into_iter()
+            .map(|l| AddressLabelEntry {
+                chain: l.chain,
+                label: l.label,
+                updated_at: l.updated_at.to_rfc3339(),
+            })
+            .collect();
+
+        // Session keys store the address as the wallet reported it, so both the
+        // raw and the normalized spelling are checked.
+        let mut keys = self.session_key_repo.find_by_wallet_address(address.trim()).await?;
+        if normalized != address.trim() {
+            keys.extend(self.session_key_repo.find_by_wallet_address(&normalized).await?);
+        }
+        let mut seen = HashSet::new();
+        let mut accounts = Vec::new();
+        for key in keys {
+            if !seen.insert(key.user_id) {
+                continue;
+            }
+            // Accounts that have not opted in are skipped without any hint that they exist.
+            if let Ok(owner) = self.user_repo.find_by_id(&key.user_id).await {
+                if owner.wallet_discoverable {
+                    let display_name = owner
+                        .display_name
+                        .filter(|n| !n.trim().is_empty())
+                        .unwrap_or_else(|| "Txio account".to_string());
+                    accounts.push(AccountEntry { display_name });
+                }
+            }
+        }
+
+        Ok(AddressOwnersResponse {
+            address: address.trim().to_string(),
+            chain: chain.map(str::to_string),
+            labels,
+            accounts,
+            unavailable_sources: vec!["onchain_names"],
+        })
     }
 
     pub async fn history(

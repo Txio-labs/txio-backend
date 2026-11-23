@@ -44,6 +44,10 @@ pub struct User {
     pub x_account: Option<XAccount>,
     #[serde(default)]
     pub notification_preferences: NotificationPreferences,
+    /// When true, the public address lookup may return this account's display
+    /// name for wallets it controls. Off by default; a user must opt in.
+    #[serde(default)]
+    pub wallet_discoverable: bool,
     #[serde(default)]
     pub failed_login_attempts: i32,
     #[serde(
@@ -98,6 +102,7 @@ impl User {
             github_account: None,
             x_account: None,
             notification_preferences: NotificationPreferences::default(),
+            wallet_discoverable: false,
             failed_login_attempts: 0,
             locked_until: None,
             is_admin: false,

@@ -1,3 +1,4 @@
+pub mod address_label;
 pub mod api_key;
 pub mod bridge_chain;
 pub mod bridge_offramp;

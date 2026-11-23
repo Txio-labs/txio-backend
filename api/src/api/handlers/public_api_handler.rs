@@ -1,4 +1,8 @@
-use crate::dtos::public_api_dtos::{ExecuteTransactionRequest, PublicHistoryEntry, PublicHistoryQuery, SimulateTransactionRequest};
+use crate::dtos::public_api_dtos::{
+    AddressLabelRequest, AddressLabelResponse, AddressOwnerQuery, ExecuteTransactionRequest, PublicHistoryEntry,
+    PublicHistoryQuery, SimulateTransactionRequest,
+};
+use crate::model::address_label::{normalize_address, validate_label, LOOKUP_CHAINS};
 use crate::services::public_api_service::PublicApiService;
 use crate::utils::api_key_auth::ApiKeyAuth;
 use crate::utils::error::AppError;
@@ -20,6 +24,48 @@ pub async fn get_history(
         .await?;
     let entries: Vec<PublicHistoryEntry> = entries.into_iter().map(Into::into).collect();
     Ok(Json(serde_json::to_value(entries).map_err(|_| AppError::InternalError("Serialization failed".into()))?))
+}
+
+fn check_chain(raw: &str) -> Result<&'static str, AppError> {
+    LOOKUP_CHAINS
+        .iter()
+        .copied()
+        .find(|c| *c == raw.trim())
+        .ok_or_else(|| AppError::BadRequest(format!("chain must be one of: {}", LOOKUP_CHAINS.join(", "))))
+}
+
+fn check_address(raw: &str) -> Result<String, AppError> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() || trimmed.len() > 128 {
+        return Err(AppError::BadRequest("address must be 1 to 128 characters".into()));
+    }
+    Ok(normalize_address(trimmed))
+}
+
+pub async fn get_address_owners(
+    State(service): State<PublicApiService>,
+    auth: ApiKeyAuth,
+    Query(query): Query<AddressOwnerQuery>,
+) -> Result<Json<Value>, AppError> {
+    auth.require_scope("addresses:read")?;
+    check_address(&query.address)?;
+    let chain = query.chain.as_deref().map(check_chain).transpose()?;
+    let response = service.address_owners(auth.user_id, query.address.trim(), chain).await?;
+    Ok(Json(serde_json::to_value(response).map_err(|_| AppError::InternalError("Serialization failed".into()))?))
+}
+
+pub async fn put_address_label(
+    State(service): State<PublicApiService>,
+    auth: ApiKeyAuth,
+    Json(payload): Json<AddressLabelRequest>,
+) -> Result<Json<Value>, AppError> {
+    auth.require_scope("addresses:write")?;
+    let chain = check_chain(&payload.chain)?;
+    let address = check_address(&payload.address)?;
+    let label = validate_label(&payload.label).map_err(AppError::BadRequest)?;
+    service.set_label(auth.user_id, chain, &address, &label).await?;
+    let response = AddressLabelResponse { address, chain: chain.to_string(), label };
+    Ok(Json(serde_json::to_value(response).map_err(|_| AppError::InternalError("Serialization failed".into()))?))
 }
 
 pub async fn simulate_transaction(

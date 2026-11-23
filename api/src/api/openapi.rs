@@ -12,6 +12,8 @@ use serde_json::{json, Value};
 pub const PUBLIC_ROUTES: &[(&str, &str)] = &[
     ("get", "/openapi.json"),
     ("get", "/history"),
+    ("get", "/addresses/owners"),
+    ("put", "/addresses/labels"),
     ("post", "/transactions/simulate"),
     ("post", "/transactions/execute"),
 ];
@@ -58,6 +60,47 @@ pub fn document() -> Value {
                             "headers": rate_limit_headers(),
                             "content": { "application/json": { "schema": { "type": "array", "items": { "$ref": "#/components/schemas/HistoryEntry" } } } }
                         },
+                        "401": error_response("Missing, invalid or revoked API key"),
+                        "403": error_response("The key lacks the required scope"),
+                        "429": error_response("Rate limit exceeded; see Retry-After")
+                    }
+                }
+            },
+            "/addresses/owners": {
+                "get": {
+                    "operationId": "getAddressOwners",
+                    "summary": "Who an address belongs to",
+                    "description": "Requires scope `addresses:read`. Returns the calling user's own labels for the address, and any Txio accounts that controlled it and opted in to being found (`wallet_discoverable`). Accounts that have not opted in are never returned, not even as a count. `unavailable_sources` lists sources not yet checked (currently `onchain_names`: SuiNS, ENS and Aptos Names reverse lookups), so an empty `labels` or `accounts` is not proof that nobody owns the address.",
+                    "parameters": [
+                        { "name": "address", "in": "query", "required": true, "schema": { "type": "string", "maxLength": 128 } },
+                        { "name": "chain", "in": "query", "schema": { "type": "string", "enum": ["sui", "evm", "solana", "aptos", "stellar", "starknet"] } }
+                    ],
+                    "responses": {
+                        "200": {
+                            "description": "Owner information for the address",
+                            "headers": rate_limit_headers(),
+                            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AddressOwners" } } }
+                        },
+                        "400": error_response("Missing or malformed address or chain"),
+                        "401": error_response("Missing, invalid or revoked API key"),
+                        "403": error_response("The key lacks the required scope"),
+                        "429": error_response("Rate limit exceeded; see Retry-After")
+                    }
+                }
+            },
+            "/addresses/labels": {
+                "put": {
+                    "operationId": "putAddressLabel",
+                    "summary": "Save a label for an address",
+                    "description": "Requires scope `addresses:write`. Creates or replaces the calling user's label for one address on one chain. Labels are private to that user.",
+                    "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AddressLabelRequest" } } } },
+                    "responses": {
+                        "200": {
+                            "description": "The saved label",
+                            "headers": rate_limit_headers(),
+                            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AddressLabel" } } }
+                        },
+                        "400": error_response("Missing or malformed address, chain or label"),
                         "401": error_response("Missing, invalid or revoked API key"),
                         "403": error_response("The key lacks the required scope"),
                         "429": error_response("Rate limit exceeded; see Retry-After")
@@ -116,7 +159,7 @@ pub fn document() -> Value {
         },
         "components": {
             "securitySchemes": {
-                "apiKey": { "type": "http", "scheme": "bearer", "description": "A txio API key. Scopes: history:read, routes:read, transactions:simulate, transactions:execute. A key without a route's scope gets 403 (-32011)." }
+                "apiKey": { "type": "http", "scheme": "bearer", "description": "A txio API key. Scopes: history:read, routes:read, transactions:simulate, transactions:execute, addresses:read, addresses:write. A key without a route's scope gets 403 (-32011)." }
             },
             "schemas": {
                 "ErrorEnvelope": {
@@ -143,6 +186,31 @@ pub fn document() -> Value {
                             }
                         }
                     }
+                },
+                "AddressOwners": {
+                    "type": "object",
+                    "required": ["address", "labels", "accounts", "unavailable_sources"],
+                    "properties": {
+                        "address": { "type": "string" },
+                        "chain": { "type": ["string", "null"] },
+                        "labels": { "type": "array", "items": { "type": "object", "required": ["chain", "label", "updated_at"], "properties": { "chain": { "type": "string" }, "label": { "type": "string" }, "updated_at": { "type": "string", "format": "date-time" } } } },
+                        "accounts": { "type": "array", "items": { "type": "object", "required": ["display_name"], "properties": { "display_name": { "type": "string" } } } },
+                        "unavailable_sources": { "type": "array", "items": { "type": "string", "enum": ["onchain_names"] } }
+                    }
+                },
+                "AddressLabelRequest": {
+                    "type": "object",
+                    "required": ["address", "chain", "label"],
+                    "properties": {
+                        "address": { "type": "string", "maxLength": 128 },
+                        "chain": { "type": "string", "enum": ["sui", "evm", "solana", "aptos", "stellar", "starknet"] },
+                        "label": { "type": "string", "minLength": 1, "maxLength": 80 }
+                    }
+                },
+                "AddressLabel": {
+                    "type": "object",
+                    "required": ["address", "chain", "label"],
+                    "properties": { "address": { "type": "string" }, "chain": { "type": "string" }, "label": { "type": "string" } }
                 },
                 "HistoryEntry": {
                     "type": "object",

@@ -262,11 +262,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         services::offramp_service::OfframpService::new(bridge_xyz_client, transak_client);
     let idempotency_repo = repositories::idempotency_repository::IdempotencyRepository::new(&db);
     idempotency_repo.ensure_indices().await?;
+    let address_label_repo = repositories::address_label_repository::AddressLabelRepository::new(&db);
+    address_label_repo.ensure_indices().await?;
     let public_api_service = services::public_api_service::PublicApiService::new(
         public_history_repo,
         idempotency_repo,
         session_key_service.clone(),
         spend_policy_service.clone(),
+        address_label_repo,
+        user_repo.clone(),
+        repositories::session_key_repository::SessionKeyRepository::new(&db),
     );
 
     // Background worker: polls due/triggered scheduled tasks and executes

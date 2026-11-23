@@ -6,7 +6,14 @@ use validator::Validate;
 /// Scopes an API key can be granted — a fixed set, same rationale as
 /// webhook_subscription's WEBHOOK_EVENTS: keeps issuing code and any future
 /// scope-check code in sync with what's actually enforced.
-pub const API_KEY_SCOPES: &[&str] = &["history:read", "routes:read", "transactions:simulate", "transactions:execute"];
+pub const API_KEY_SCOPES: &[&str] = &[
+    "history:read",
+    "routes:read",
+    "transactions:simulate",
+    "transactions:execute",
+    "addresses:read",
+    "addresses:write",
+];
 
 /// A public-API credential. The raw key is shown exactly once, at creation
 /// (standard API-key UX) — only its SHA-256 hash is ever stored, looked up

@@ -1,4 +1,5 @@
 pub mod admin_repository;
+pub mod address_label_repository;
 pub mod api_key_repository;
 pub mod bridge_offramp_repository;
 pub mod bridge_order_repository;

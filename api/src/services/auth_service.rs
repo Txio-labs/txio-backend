@@ -820,6 +820,7 @@ mod oauth_tests {
             github_account: None,
             x_account: None,
             notification_preferences: crate::model::user::NotificationPreferences::default(),
+            wallet_discoverable: false,
             failed_login_attempts: 0,
             locked_until: None,
             is_admin: false,

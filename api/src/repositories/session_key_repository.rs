@@ -32,6 +32,20 @@ impl SessionKeyRepository {
         Ok(created)
     }
 
+    /// Session keys authorized for one wallet address, across all users. Used
+    /// to find which Txio accounts control an address.
+    pub async fn find_by_wallet_address(&self, wallet_address: &str) -> Result<Vec<SessionKey>, AppError> {
+        let mut cursor = self
+            .collection
+            .find(doc! { "wallet_address": wallet_address }, None)
+            .await?;
+        let mut keys = Vec::new();
+        while cursor.advance().await? {
+            keys.push(cursor.deserialize_current().map_err(AppError::Database)?);
+        }
+        Ok(keys)
+    }
+
     pub async fn find_by_user(&self, user_id: ObjectId) -> Result<Vec<SessionKey>, AppError> {
         let find_options = FindOptions::builder().sort(doc! { "created_at": -1 }).build();
         let mut cursor = self
