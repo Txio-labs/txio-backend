@@ -5,6 +5,7 @@ pub mod auth_handler;
 pub mod bridge_handler;
 pub mod collection_handler;
 pub mod history_handler;
+pub mod stellar_handler;
 pub mod recipe_template_handler;
 pub mod scheduled_task_handler;
 pub mod session_key_handler;

@@ -6,6 +6,7 @@ pub mod bridge_order;
 pub mod collection;
 pub mod desktop_auth_code;
 pub mod history;
+pub mod stellar_event;
 pub mod network;
 pub mod otp;
 pub mod recipe_template;
