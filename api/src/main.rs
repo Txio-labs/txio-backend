@@ -118,6 +118,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let history_repo = repositories::history_repository::HistoryRepository::new(&db);
     history_repo.ensure_indices().await?;
 
+    let stellar_event_repo =
+        repositories::stellar_event_repository::StellarEventRepository::new(&db);
+    stellar_event_repo.ensure_indexes().await?;
+    let stellar_indexer = services::stellar_indexer::StellarIndexer::new(stellar_event_repo);
+    stellar_indexer.clone().spawn();
+
     let spend_policy_repo = repositories::spend_policy_repository::SpendPolicyRepository::new(&db);
     spend_policy_repo.ensure_indices().await?;
 
@@ -379,6 +385,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .nest(
             "/api/v1/history",
             api::routers::history_router::router(history_service),
+        )
+        .nest(
+            "/api/v1/stellar",
+            api::routers::stellar_router::router(stellar_indexer),
         )
         .nest(
             "/api/v1/workspaces",

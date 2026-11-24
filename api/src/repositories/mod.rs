@@ -19,3 +19,4 @@ pub mod webhook_delivery_repository;
 pub mod webhook_subscription_repository;
 pub mod workspace_member_repository;
 pub mod workspace_repository;
+pub mod stellar_event_repository;

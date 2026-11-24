@@ -5,6 +5,7 @@ pub mod auth_router;
 pub mod bridge_router;
 pub mod collection_router;
 pub mod history_router;
+pub mod stellar_router;
 pub mod recipe_template_router;
 pub mod scheduled_task_router;
 pub mod session_key_router;

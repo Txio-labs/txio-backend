@@ -20,5 +20,7 @@ pub mod spend_policy_service;
 pub mod sui_service;
 pub mod terminal_service;
 pub mod webhook_service;
+pub mod stellar_indexer;
+pub mod stellar_token;
 pub mod workspace_access;
 pub mod workspace_service;
